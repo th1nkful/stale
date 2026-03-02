@@ -83,7 +83,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.event.repository.default_branch }}
 
       - name: Update Homebrew formula
         env:
@@ -91,7 +91,7 @@ jobs:
         run: |
           VERSION="${TAG#v}"
           URL="https://github.com/${{ github.repository }}/archive/refs/tags/${TAG}.tar.gz"
-          SHA256=$(curl -sL "$URL" | shasum -a 256 | awk '{print $1}')
+          SHA256=$(curl -fsSL "$URL" | shasum -a 256 | awk '{print $1}')
 
           sed -i "s|url \".*\"|url \"${URL}\"|" Formula/stale.rb
           sed -i "s|sha256 \".*\"|sha256 \"${SHA256}\"|" Formula/stale.rb
