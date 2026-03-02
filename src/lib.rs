@@ -26,11 +26,13 @@ pub fn expand_globs(patterns: &[String]) -> Result<Vec<PathBuf>> {
     Ok(paths)
 }
 
-/// Compute a combined SHA-256 hash over the given files.
+/// Compute a combined SHA-256 hash over the given files and optional extra
+/// strings.
 ///
 /// The hash is built by feeding each file's path and its contents into the
-/// hasher in sorted order, so the result is deterministic.
-pub fn compute_hash(files: &[PathBuf]) -> Result<String> {
+/// hasher in sorted order, followed by any extra strings, so the result is
+/// deterministic.
+pub fn compute_hash(files: &[PathBuf], extra_strings: &[String]) -> Result<String> {
     let mut hasher = Sha256::new();
 
     for path in files {
@@ -45,12 +47,20 @@ pub fn compute_hash(files: &[PathBuf]) -> Result<String> {
         hasher.update(b"\0");
     }
 
+    for s in extra_strings {
+        hasher.update(s.as_bytes());
+        hasher.update(b"\0");
+    }
+
     Ok(hex::encode(hasher.finalize()))
 }
 
-/// Compute a combined SHA-256 hash over the given files, returning a per-file
-/// breakdown alongside the combined hash.
-pub fn compute_hash_verbose(files: &[PathBuf]) -> Result<(String, BTreeMap<String, String>)> {
+/// Compute a combined SHA-256 hash over the given files and optional extra
+/// strings, returning a per-file breakdown alongside the combined hash.
+pub fn compute_hash_verbose(
+    files: &[PathBuf],
+    extra_strings: &[String],
+) -> Result<(String, BTreeMap<String, String>)> {
     let mut hasher = Sha256::new();
     let mut per_file: BTreeMap<String, String> = BTreeMap::new();
 
@@ -71,21 +81,32 @@ pub fn compute_hash_verbose(files: &[PathBuf]) -> Result<(String, BTreeMap<Strin
         hasher.update(b"\0");
     }
 
+    for s in extra_strings {
+        hasher.update(s.as_bytes());
+        hasher.update(b"\0");
+    }
+
     Ok((hex::encode(hasher.finalize()), per_file))
 }
 
-/// Derive a stable short name from a list of glob patterns.
+/// Derive a stable short name from a list of glob patterns and optional extra
+/// strings.
 ///
 /// The name is the first 12 hex characters of the SHA-256 hash of the
-/// sorted, newline-joined patterns.  This gives a deterministic identifier
-/// so repeated invocations with the same patterns always map to the same
-/// entry in the `.sum` file without requiring the user to supply `--name`.
-pub fn derive_name(patterns: &[String]) -> String {
+/// sorted, newline-joined patterns followed by any extra strings.  This gives
+/// a deterministic identifier so repeated invocations with the same patterns
+/// and strings always map to the same entry in the `.sum` file without
+/// requiring the user to supply `--name`.
+pub fn derive_name(patterns: &[String], extra_strings: &[String]) -> String {
     let mut hasher = Sha256::new();
     let mut sorted = patterns.to_vec();
     sorted.sort();
     for p in &sorted {
         hasher.update(p.as_bytes());
+        hasher.update(b"\n");
+    }
+    for s in extra_strings {
+        hasher.update(s.as_bytes());
         hasher.update(b"\n");
     }
     hex::encode(hasher.finalize())[..12].to_string()
@@ -179,7 +200,7 @@ mod tests {
 
     #[test]
     fn test_compute_hash_empty_list() {
-        let hash = compute_hash(&[]).unwrap();
+        let hash = compute_hash(&[], &[]).unwrap();
         assert_eq!(hash.len(), 64);
     }
 
@@ -188,8 +209,8 @@ mod tests {
         let f1 = write_temp(b"hello");
         let f2 = write_temp(b"world");
         let files = vec![f1.path().to_path_buf(), f2.path().to_path_buf()];
-        let h1 = compute_hash(&files).unwrap();
-        let h2 = compute_hash(&files).unwrap();
+        let h1 = compute_hash(&files, &[]).unwrap();
+        let h2 = compute_hash(&files, &[]).unwrap();
         assert_eq!(h1, h2);
     }
 
@@ -198,11 +219,11 @@ mod tests {
         let mut f = NamedTempFile::new().unwrap();
         f.write_all(b"v1").unwrap();
         let files = vec![f.path().to_path_buf()];
-        let h1 = compute_hash(&files).unwrap();
+        let h1 = compute_hash(&files, &[]).unwrap();
 
         f.reopen().unwrap();
         fs::write(f.path(), b"v2").unwrap();
-        let h2 = compute_hash(&files).unwrap();
+        let h2 = compute_hash(&files, &[]).unwrap();
 
         assert_ne!(h1, h2);
     }
@@ -281,16 +302,16 @@ mod tests {
     #[test]
     fn test_derive_name_stable() {
         let patterns = vec!["src/**/*.rs".to_string(), "tests/**".to_string()];
-        let n1 = derive_name(&patterns);
-        let n2 = derive_name(&patterns);
+        let n1 = derive_name(&patterns, &[]);
+        let n2 = derive_name(&patterns, &[]);
         assert_eq!(n1, n2);
         assert_eq!(n1.len(), 12);
     }
 
     #[test]
     fn test_derive_name_order_independent() {
-        let a = derive_name(&["src/**".to_string(), "tests/**".to_string()]);
-        let b = derive_name(&["tests/**".to_string(), "src/**".to_string()]);
+        let a = derive_name(&["src/**".to_string(), "tests/**".to_string()], &[]);
+        let b = derive_name(&["tests/**".to_string(), "src/**".to_string()], &[]);
         assert_eq!(a, b);
     }
 
@@ -316,6 +337,60 @@ mod tests {
         let pattern = format!("{}/*.txt", dir.path().display());
         let files = expand_globs(&[pattern.clone(), pattern]).unwrap();
         assert_eq!(files.len(), 1);
+    }
+
+    #[test]
+    fn test_compute_hash_with_extra_strings() {
+        let f = write_temp(b"hello");
+        let files = vec![f.path().to_path_buf()];
+        let h1 = compute_hash(&files, &[]).unwrap();
+        let h2 = compute_hash(&files, &["extra".to_string()]).unwrap();
+        assert_ne!(h1, h2, "extra strings should change the hash");
+    }
+
+    #[test]
+    fn test_compute_hash_extra_strings_deterministic() {
+        let f = write_temp(b"hello");
+        let files = vec![f.path().to_path_buf()];
+        let strings = vec!["v1.0.0".to_string()];
+        let h1 = compute_hash(&files, &strings).unwrap();
+        let h2 = compute_hash(&files, &strings).unwrap();
+        assert_eq!(h1, h2, "same strings should produce the same hash");
+    }
+
+    #[test]
+    fn test_compute_hash_different_strings_different_hash() {
+        let f = write_temp(b"hello");
+        let files = vec![f.path().to_path_buf()];
+        let h1 = compute_hash(&files, &["v1".to_string()]).unwrap();
+        let h2 = compute_hash(&files, &["v2".to_string()]).unwrap();
+        assert_ne!(h1, h2, "different strings should produce different hashes");
+    }
+
+    #[test]
+    fn test_compute_hash_verbose_with_extra_strings() {
+        let f = write_temp(b"hello");
+        let files = vec![f.path().to_path_buf()];
+        let (h1, _) = compute_hash_verbose(&files, &[]).unwrap();
+        let (h2, _) = compute_hash_verbose(&files, &["extra".to_string()]).unwrap();
+        assert_ne!(h1, h2, "extra strings should change the verbose hash");
+    }
+
+    #[test]
+    fn test_derive_name_with_strings() {
+        let patterns = vec!["src/**".to_string()];
+        let n1 = derive_name(&patterns, &[]);
+        let n2 = derive_name(&patterns, &["v1.0.0".to_string()]);
+        assert_ne!(n1, n2, "extra strings should change the derived name");
+        assert_eq!(n2.len(), 12);
+    }
+
+    #[test]
+    fn test_compute_hash_strings_only() {
+        let h1 = compute_hash(&[], &["version=1.0".to_string()]).unwrap();
+        let h2 = compute_hash(&[], &["version=2.0".to_string()]).unwrap();
+        assert_ne!(h1, h2, "different strings-only hashes should differ");
+        assert_eq!(h1.len(), 64);
     }
 }
 

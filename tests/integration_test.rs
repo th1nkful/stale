@@ -199,3 +199,278 @@ fn warns_when_no_files_matched() {
     );
 }
 
+// ── exact file paths ─────────────────────────────────────────────────────────
+
+#[test]
+fn exact_file_path_is_accepted() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("exact.txt");
+    fs::write(&file, b"content").unwrap();
+
+    let (_, _, code) = run_stale(&dir, &[file.to_str().unwrap(), "--", helper()]);
+    assert_eq!(code, 0, "exact file path should be accepted");
+}
+
+#[test]
+fn exact_file_unchanged_skips_command() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("exact.txt");
+    fs::write(&file, b"content").unwrap();
+
+    // First run saves state.
+    let (_, _, code1) = run_stale(&dir, &[file.to_str().unwrap(), "--", helper()]);
+    assert_eq!(code1, 0);
+
+    // Second run with same file should skip.
+    let flag = dir.path().join("ran.txt");
+    let (_, _, code2) = run_stale(
+        &dir,
+        &[file.to_str().unwrap(), "--", helper(), "--touch", flag.to_str().unwrap()],
+    );
+    assert_eq!(code2, 0);
+    assert!(!flag.exists(), "command should be skipped for unchanged exact file");
+}
+
+#[test]
+fn multiple_exact_files_accepted() {
+    let dir = tempfile::tempdir().unwrap();
+    let f1 = dir.path().join("a.txt");
+    let f2 = dir.path().join("b.txt");
+    fs::write(&f1, b"aaa").unwrap();
+    fs::write(&f2, b"bbb").unwrap();
+
+    let (_, _, code) = run_stale(
+        &dir,
+        &[f1.to_str().unwrap(), f2.to_str().unwrap(), "--", helper()],
+    );
+    assert_eq!(code, 0, "multiple exact files should be accepted");
+}
+
+// ── package.json / uv.lock version tracking ──────────────────────────────────
+
+#[test]
+fn package_json_version_change_triggers_rerun() {
+    let dir = tempfile::tempdir().unwrap();
+    let pkg = dir.path().join("package.json");
+    let src = dir.path().join("index.js");
+    fs::write(&pkg, r#"{"dependencies":{"express":"4.18.0"}}"#).unwrap();
+    fs::write(&src, b"console.log('hello')").unwrap();
+
+    // First run saves state.
+    let (_, _, code1) = run_stale(&dir, &["package.json", "*.js", "--", helper()]);
+    assert_eq!(code1, 0);
+
+    // Change a version in package.json.
+    fs::write(&pkg, r#"{"dependencies":{"express":"4.19.0"}}"#).unwrap();
+
+    // Should re-run because package.json content changed.
+    let flag = dir.path().join("ran.txt");
+    let (_, _, code2) = run_stale(
+        &dir,
+        &["package.json", "*.js", "--", helper(), "--touch", flag.to_str().unwrap()],
+    );
+    assert_eq!(code2, 0);
+    assert!(flag.exists(), "version bump in package.json should trigger re-run");
+}
+
+#[test]
+fn uv_lock_change_triggers_rerun() {
+    let dir = tempfile::tempdir().unwrap();
+    let lock = dir.path().join("uv.lock");
+    let src = dir.path().join("main.py");
+    fs::write(&lock, b"requests==2.31.0").unwrap();
+    fs::write(&src, b"import requests").unwrap();
+
+    // First run saves state.
+    let (_, _, code1) = run_stale(&dir, &["uv.lock", "*.py", "--", helper()]);
+    assert_eq!(code1, 0);
+
+    // Update uv.lock.
+    fs::write(&lock, b"requests==2.32.0").unwrap();
+
+    // Should re-run.
+    let flag = dir.path().join("ran.txt");
+    let (_, _, code2) = run_stale(
+        &dir,
+        &["uv.lock", "*.py", "--", helper(), "--touch", flag.to_str().unwrap()],
+    );
+    assert_eq!(code2, 0);
+    assert!(flag.exists(), "version bump in uv.lock should trigger re-run");
+}
+
+// ── recursive glob patterns ─────────────────────────────────────────────────
+
+#[test]
+fn recursive_glob_matches_nested_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let sub = dir.path().join("sub").join("deep");
+    fs::create_dir_all(&sub).unwrap();
+    fs::write(dir.path().join("root.txt"), b"root").unwrap();
+    fs::write(sub.join("nested.txt"), b"nested").unwrap();
+
+    let pattern = format!("{}/**/*.txt", dir.path().display());
+    let (_, _, code) = run_stale(&dir, &[&pattern, "--", helper()]);
+    assert_eq!(code, 0, "recursive glob should match nested files");
+}
+
+#[test]
+fn recursive_glob_detects_nested_change() {
+    let dir = tempfile::tempdir().unwrap();
+    let sub = dir.path().join("sub");
+    fs::create_dir_all(&sub).unwrap();
+    fs::write(sub.join("file.txt"), b"v1").unwrap();
+
+    let pattern = format!("{}/**/*.txt", dir.path().display());
+
+    // First run saves state.
+    let (_, _, code1) = run_stale(&dir, &[&pattern, "--", helper()]);
+    assert_eq!(code1, 0);
+
+    // Modify nested file.
+    fs::write(sub.join("file.txt"), b"v2").unwrap();
+
+    // Should detect the change.
+    let flag = dir.path().join("ran.txt");
+    let (_, _, code2) = run_stale(
+        &dir,
+        &[&pattern, "--", helper(), "--touch", flag.to_str().unwrap()],
+    );
+    assert_eq!(code2, 0);
+    assert!(flag.exists(), "should detect change in nested file via recursive glob");
+}
+
+// ── string flag ──────────────────────────────────────────────────────────────
+
+#[test]
+fn string_flag_changes_hash() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("file.txt"), b"hello").unwrap();
+
+    // Save state with string v1.
+    let (_, _, code1) = run_stale(&dir, &["-s", "v1", "*.txt", "--", helper()]);
+    assert_eq!(code1, 0);
+
+    // Same file but different string should trigger re-run.
+    let flag = dir.path().join("ran.txt");
+    let (_, _, code2) = run_stale(
+        &dir,
+        &["-s", "v2", "*.txt", "--", helper(), "--touch", flag.to_str().unwrap()],
+    );
+    assert_eq!(code2, 0);
+    assert!(flag.exists(), "different --string should trigger re-run");
+}
+
+#[test]
+fn same_string_skips_command() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("file.txt"), b"hello").unwrap();
+
+    // Save state with string v1.
+    let (_, _, code1) = run_stale(&dir, &["-s", "v1", "--name", "str-test", "*.txt", "--", helper()]);
+    assert_eq!(code1, 0);
+
+    // Same string and same file should skip.
+    let flag = dir.path().join("ran.txt");
+    let (_, _, code2) = run_stale(
+        &dir,
+        &["-s", "v1", "--name", "str-test", "*.txt", "--", helper(), "--touch", flag.to_str().unwrap()],
+    );
+    assert_eq!(code2, 0);
+    assert!(!flag.exists(), "same --string value should skip command");
+}
+
+#[test]
+fn multiple_strings_accepted() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("file.txt"), b"hello").unwrap();
+
+    let (_, _, code) = run_stale(
+        &dir,
+        &["-s", "str1", "-s", "str2", "*.txt", "--", helper()],
+    );
+    assert_eq!(code, 0, "multiple --string values should be accepted");
+}
+
+// ── chaining (skip / run) ───────────────────────────────────────────────────
+
+#[test]
+fn chain_skip_exits_0_when_unchanged() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("file.txt"), b"hello").unwrap();
+
+    // First run to save state (with command).
+    let (_, _, code1) = run_stale(&dir, &["*.txt", "--", helper()]);
+    assert_eq!(code1, 0);
+
+    // Check-only (no command) should exit 0 when unchanged.
+    let (_, _, code2) = run_stale(&dir, &["*.txt"]);
+    assert_eq!(code2, 0, "should exit 0 when files unchanged (chain skip)");
+}
+
+#[test]
+fn chain_run_exits_1_when_changed() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("file.txt"), b"hello").unwrap();
+
+    // No prior state → exit 1.
+    let (_, _, code) = run_stale(&dir, &["*.txt"]);
+    assert_eq!(code, 1, "should exit 1 when files changed (chain run)");
+}
+
+#[test]
+fn chain_run_exits_1_after_modification() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("file.txt");
+    fs::write(&file, b"v1").unwrap();
+
+    // Save state.
+    let (_, _, code1) = run_stale(&dir, &["*.txt", "--", helper()]);
+    assert_eq!(code1, 0);
+
+    // Modify file.
+    fs::write(&file, b"v2").unwrap();
+
+    // Should exit 1 (changed).
+    let (_, _, code2) = run_stale(&dir, &["*.txt"]);
+    assert_eq!(code2, 1, "should exit 1 after file modification (chain run)");
+}
+
+// ── should-run check ────────────────────────────────────────────────────────
+
+#[test]
+fn should_run_returns_1_for_new_files() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("new.txt"), b"new").unwrap();
+
+    let (_, _, code) = run_stale(&dir, &["*.txt"]);
+    assert_eq!(code, 1, "new files with no prior state should return 1");
+}
+
+#[test]
+fn should_run_returns_0_after_successful_command() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("file.txt"), b"content").unwrap();
+
+    // Run command to save state.
+    let (_, _, code1) = run_stale(&dir, &["*.txt", "--", helper()]);
+    assert_eq!(code1, 0);
+
+    // Check should return 0 (unchanged).
+    let (_, _, code2) = run_stale(&dir, &["*.txt"]);
+    assert_eq!(code2, 0, "should return 0 after successful command");
+}
+
+#[test]
+fn should_run_returns_1_after_failed_command() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("file.txt"), b"content").unwrap();
+
+    // Run failing command (state not saved).
+    let (_, _, code1) = run_stale(&dir, &["*.txt", "--", helper(), "--fail"]);
+    assert_ne!(code1, 0);
+
+    // Check should return 1 (no saved state).
+    let (_, _, code2) = run_stale(&dir, &["*.txt"]);
+    assert_eq!(code2, 1, "should return 1 after failed command (state not saved)");
+}
+

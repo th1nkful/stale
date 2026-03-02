@@ -50,6 +50,13 @@ struct Cli {
     #[arg(short, long, value_name = "NAME")]
     name: Option<String>,
 
+    /// Extra strings to include in the hash.
+    ///
+    /// Useful for incorporating version numbers, environment variables, or
+    /// other values that should trigger a re-run when they change.
+    #[arg(short, long = "string", value_name = "STRING")]
+    strings: Vec<String>,
+
     /// Always run the command even if the files have not changed.
     #[arg(long)]
     force: bool,
@@ -64,28 +71,28 @@ struct Cli {
 }
 
 fn run(cli: Cli) -> Result<i32> {
-    // Resolve the entry name: explicit flag > derived from glob patterns.
+    // Resolve the entry name: explicit flag > derived from glob patterns + strings.
     let name = cli
         .name
         .clone()
-        .unwrap_or_else(|| derive_name(&cli.globs));
+        .unwrap_or_else(|| derive_name(&cli.globs, &cli.strings));
 
     // Expand globs to a sorted, deduplicated file list.
     let files = expand_globs(&cli.globs)?;
 
-    if files.is_empty() {
+    if files.is_empty() && cli.strings.is_empty() {
         eprintln!("stale: warning: no files matched the provided patterns");
     }
 
     // Compute hash (with optional per-file breakdown for verbose mode).
     let current_hash = if cli.verbose {
-        let (combined, per_file) = compute_hash_verbose(&files)?;
+        let (combined, per_file) = compute_hash_verbose(&files, &cli.strings)?;
         for (path, hash) in &per_file {
             eprintln!("  {hash}  {path}");
         }
         combined
     } else {
-        compute_hash(&files)?
+        compute_hash(&files, &cli.strings)?
     };
 
     if cli.verbose {
