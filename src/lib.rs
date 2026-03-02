@@ -438,6 +438,64 @@ mod tests {
     }
 
     #[test]
+    fn test_derive_name_with_prefix_differs() {
+        let patterns = vec!["*.txt".to_string()];
+        let without = derive_name(&patterns, None);
+        let with_a = derive_name(&patterns, Some("subdir_a"));
+        let with_b = derive_name(&patterns, Some("subdir_b"));
+        assert_ne!(without, with_a, "prefix should change the derived name");
+        assert_ne!(with_a, with_b, "different prefixes should produce different names");
+    }
+
+    #[test]
+    fn test_find_git_root_found() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir(dir.path().join(".git")).unwrap();
+        let result = find_git_root(dir.path(), None);
+        assert_eq!(result, Some(dir.path().to_path_buf()));
+    }
+
+    #[test]
+    fn test_find_git_root_found_in_parent() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir(dir.path().join(".git")).unwrap();
+        let sub = dir.path().join("a").join("b");
+        fs::create_dir_all(&sub).unwrap();
+        let result = find_git_root(&sub, None);
+        assert_eq!(result, Some(dir.path().to_path_buf()));
+    }
+
+    #[test]
+    fn test_find_git_root_not_found() {
+        let dir = tempfile::tempdir().unwrap();
+        // No .git directory in this temp dir.
+        let result = find_git_root(dir.path(), None);
+        // It may return an ancestor if the test runner itself lives inside a
+        // git repository, but it must never return the temp dir itself and any
+        // returned path must actually contain `.git`.
+        match result {
+            None => {} // expected in most environments
+            Some(ref root) => {
+                assert!(root.join(".git").exists(), "returned root must contain .git");
+                assert_ne!(root, &dir.path().to_path_buf());
+            }
+        }
+    }
+
+    #[test]
+    fn test_find_git_root_stops_at_ceiling() {
+        let dir = tempfile::tempdir().unwrap();
+        // .git is at the root of the temp dir.
+        fs::create_dir(dir.path().join(".git")).unwrap();
+        let sub = dir.path().join("a").join("b");
+        fs::create_dir_all(&sub).unwrap();
+        // The ceiling is between our start and the .git directory.
+        let ceiling = dir.path().join("a");
+        let result = find_git_root(&sub, Some(&ceiling));
+        assert_eq!(result, None, "should not search above the ceiling");
+    }
+
+    #[test]
     fn test_expand_globs_matches_files() {
         let dir = tempfile::tempdir().unwrap();
         let file_a = dir.path().join("a.txt");
