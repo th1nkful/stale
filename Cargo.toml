@@ -10,6 +10,10 @@ repository = "https://github.com/th1nkful/stale"
 name = "stale"
 path = "src/main.rs"
 
+[[bin]]
+name = "test_helper"
+path = "src/bin/test_helper.rs"
+
 [lib]
 name = "stale"
 path = "src/lib.rs"

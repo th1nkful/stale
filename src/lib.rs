@@ -109,9 +109,10 @@ pub fn load_sum_entry(path: &Path, name: &str) -> Result<Option<String>> {
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        if let Some((entry_name, entry_hash)) = line.split_once(' ') {
+        let mut parts = line.split_whitespace();
+        if let (Some(entry_name), Some(entry_hash)) = (parts.next(), parts.next()) {
             if entry_name == name {
-                return Ok(Some(entry_hash.trim().to_string()));
+                return Ok(Some(entry_hash.to_string()));
             }
         }
     }
@@ -135,9 +136,11 @@ pub fn save_sum_entry(path: &Path, name: &str, hash: &str) -> Result<()> {
                 if trimmed.is_empty() || trimmed.starts_with('#') {
                     None
                 } else {
-                    trimmed
-                        .split_once(' ')
-                        .map(|(n, h)| (n.to_string(), h.trim().to_string()))
+                    let mut parts = trimmed.split_whitespace();
+                    match (parts.next(), parts.next()) {
+                        (Some(n), Some(h)) => Some((n.to_string(), h.to_string())),
+                        _ => None,
+                    }
                 }
             })
             .filter(|(n, _)| n != name) // remove the entry we're about to upsert
