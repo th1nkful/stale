@@ -246,56 +246,94 @@ fn multiple_exact_files_accepted() {
     assert_eq!(code, 0, "multiple exact files should be accepted");
 }
 
-// ── package.json / uv.lock version tracking ──────────────────────────────────
+// ── specific package version strings ─────────────────────────────────────────
 
 #[test]
-fn package_json_version_change_triggers_rerun() {
+fn package_version_string_triggers_rerun() {
+    // Simulates: stale -s "express@4.18.0" 'src/**' -- npm test
+    // When the express version changes, the hash changes and the command re-runs.
     let dir = tempfile::tempdir().unwrap();
-    let pkg = dir.path().join("package.json");
-    let src = dir.path().join("index.js");
-    fs::write(&pkg, r#"{"dependencies":{"express":"4.18.0"}}"#).unwrap();
-    fs::write(&src, b"console.log('hello')").unwrap();
+    fs::write(dir.path().join("index.js"), b"console.log('hello')").unwrap();
 
-    // First run saves state.
-    let (_, _, code1) = run_stale(&dir, &["package.json", "*.js", "--", helper()]);
+    // First run with express@4.18.0.
+    let (_, _, code1) = run_stale(
+        &dir,
+        &["-s", "express@4.18.0", "--name", "pkg", "*.js", "--", helper()],
+    );
     assert_eq!(code1, 0);
 
-    // Change a version in package.json.
-    fs::write(&pkg, r#"{"dependencies":{"express":"4.19.0"}}"#).unwrap();
-
-    // Should re-run because package.json content changed.
+    // Same version, same source → skip.
     let flag = dir.path().join("ran.txt");
     let (_, _, code2) = run_stale(
         &dir,
-        &["package.json", "*.js", "--", helper(), "--touch", flag.to_str().unwrap()],
+        &["-s", "express@4.18.0", "--name", "pkg", "*.js", "--", helper(), "--touch", flag.to_str().unwrap()],
     );
     assert_eq!(code2, 0);
-    assert!(flag.exists(), "version bump in package.json should trigger re-run");
+    assert!(!flag.exists(), "same package version should skip command");
+
+    // Bump express version → re-run.
+    let flag2 = dir.path().join("ran2.txt");
+    let (_, _, code3) = run_stale(
+        &dir,
+        &["-s", "express@4.19.0", "--name", "pkg", "*.js", "--", helper(), "--touch", flag2.to_str().unwrap()],
+    );
+    assert_eq!(code3, 0);
+    assert!(flag2.exists(), "bumped package version should trigger re-run");
 }
 
 #[test]
-fn uv_lock_change_triggers_rerun() {
+fn multiple_package_versions_trigger_rerun() {
+    // Simulates passing multiple specific package versions:
+    //   stale -s "requests==2.31.0" -s "flask==3.0.0" '*.py' -- pytest
     let dir = tempfile::tempdir().unwrap();
-    let lock = dir.path().join("uv.lock");
-    let src = dir.path().join("main.py");
-    fs::write(&lock, b"requests==2.31.0").unwrap();
-    fs::write(&src, b"import requests").unwrap();
+    fs::write(dir.path().join("app.py"), b"import flask").unwrap();
 
-    // First run saves state.
-    let (_, _, code1) = run_stale(&dir, &["uv.lock", "*.py", "--", helper()]);
+    // First run with two package versions.
+    let (_, _, code1) = run_stale(
+        &dir,
+        &["-s", "requests==2.31.0", "-s", "flask==3.0.0", "--name", "deps", "*.py", "--", helper()],
+    );
     assert_eq!(code1, 0);
 
-    // Update uv.lock.
-    fs::write(&lock, b"requests==2.32.0").unwrap();
-
-    // Should re-run.
+    // Same versions → skip.
     let flag = dir.path().join("ran.txt");
     let (_, _, code2) = run_stale(
         &dir,
-        &["uv.lock", "*.py", "--", helper(), "--touch", flag.to_str().unwrap()],
+        &["-s", "requests==2.31.0", "-s", "flask==3.0.0", "--name", "deps", "*.py", "--", helper(), "--touch", flag.to_str().unwrap()],
     );
     assert_eq!(code2, 0);
-    assert!(flag.exists(), "version bump in uv.lock should trigger re-run");
+    assert!(!flag.exists(), "same package versions should skip");
+
+    // Bump one package → re-run.
+    let flag2 = dir.path().join("ran2.txt");
+    let (_, _, code3) = run_stale(
+        &dir,
+        &["-s", "requests==2.32.0", "-s", "flask==3.0.0", "--name", "deps", "*.py", "--", helper(), "--touch", flag2.to_str().unwrap()],
+    );
+    assert_eq!(code3, 0);
+    assert!(flag2.exists(), "bumping one package version should trigger re-run");
+}
+
+#[test]
+fn package_version_with_unchanged_source_still_reruns() {
+    // Even if source files haven't changed, a version string change should re-run.
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("main.py"), b"print('hi')").unwrap();
+
+    let (_, _, code1) = run_stale(
+        &dir,
+        &["-s", "numpy==1.26.0", "--name", "ver", "*.py", "--", helper()],
+    );
+    assert_eq!(code1, 0);
+
+    // Source unchanged, but version bumped.
+    let flag = dir.path().join("ran.txt");
+    let (_, _, code2) = run_stale(
+        &dir,
+        &["-s", "numpy==1.27.0", "--name", "ver", "*.py", "--", helper(), "--touch", flag.to_str().unwrap()],
+    );
+    assert_eq!(code2, 0);
+    assert!(flag.exists(), "version bump alone (unchanged source) should trigger re-run");
 }
 
 // ── recursive glob patterns ─────────────────────────────────────────────────
