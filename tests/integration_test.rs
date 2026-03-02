@@ -199,3 +199,70 @@ fn warns_when_no_files_matched() {
     );
 }
 
+// ── git-root discovery ───────────────────────────────────────────────────────
+
+#[test]
+fn discovers_git_root_and_stores_sum_there() {
+    let dir = tempfile::tempdir().unwrap();
+
+    // Simulate a git repository by creating a .git directory at the root.
+    fs::create_dir(dir.path().join(".git")).unwrap();
+
+    // Create a subdirectory with a file.
+    let sub = dir.path().join("src");
+    fs::create_dir(&sub).unwrap();
+    fs::write(sub.join("code.txt"), b"hello").unwrap();
+
+    // Run stale from the subdirectory without -f.
+    let output = Command::new(binary())
+        .args(["*.txt", "--", helper()])
+        .current_dir(&sub)
+        .output()
+        .expect("Failed to run stale");
+    assert_eq!(output.status.code(), Some(0));
+
+    // The .stale.sum file should be at the git root, not in the subdirectory.
+    let root_sum = dir.path().join(".stale.sum");
+    let sub_sum = sub.join(".stale.sum");
+    assert!(root_sum.exists(), ".stale.sum should be at the git root");
+    assert!(!sub_sum.exists(), ".stale.sum should NOT be in the subdirectory");
+}
+
+#[test]
+fn git_root_entries_avoid_collision_across_subdirs() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::create_dir(dir.path().join(".git")).unwrap();
+
+    // Create two subdirectories each containing a *.txt file.
+    let sub_a = dir.path().join("a");
+    let sub_b = dir.path().join("b");
+    fs::create_dir(&sub_a).unwrap();
+    fs::create_dir(&sub_b).unwrap();
+    fs::write(sub_a.join("file.txt"), b"aaa").unwrap();
+    fs::write(sub_b.join("file.txt"), b"bbb").unwrap();
+
+    // Run stale from each subdirectory with the same glob pattern.
+    let out_a = Command::new(binary())
+        .args(["*.txt", "--", helper()])
+        .current_dir(&sub_a)
+        .output()
+        .expect("Failed to run stale");
+    assert_eq!(out_a.status.code(), Some(0));
+
+    let out_b = Command::new(binary())
+        .args(["*.txt", "--", helper()])
+        .current_dir(&sub_b)
+        .output()
+        .expect("Failed to run stale");
+    assert_eq!(out_b.status.code(), Some(0));
+
+    // Both entries should coexist in the shared .stale.sum at the git root.
+    let contents = fs::read_to_string(dir.path().join(".stale.sum")).unwrap();
+    let lines: Vec<&str> = contents.lines().collect();
+    assert_eq!(
+        lines.len(),
+        2,
+        "two different subdirectories should produce two distinct entries"
+    );
+}
+
