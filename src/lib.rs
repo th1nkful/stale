@@ -111,16 +111,17 @@ pub fn expand_globs(patterns: &[String]) -> Result<Vec<PathBuf>> {
     Ok(paths)
 }
 
-/// Compute a combined xxHash3 hash over the given files and optional extra
+/// Compute a combined xxHash3-128 hash over the given files and optional extra
 /// strings.
 ///
 /// The hash is built by feeding each file's path and its contents into the
 /// hasher in sorted order, followed by any extra strings, so the result is
 /// deterministic.
 ///
-/// Uses xxHash3 (64-bit) for speed — roughly 10–20× faster than SHA-256 on
-/// modern hardware.  Cryptographic collision resistance is not needed here;
-/// we only need to detect file-content changes between runs.
+/// Uses xxHash3-128 for speed — roughly 10–20× faster than SHA-256 on modern
+/// hardware — while providing 128 bits of collision resistance, which is more
+/// than sufficient for change detection even in large repos with long-lived
+/// `.sum` files.
 pub fn compute_hash(files: &[PathBuf], extra_strings: &[String]) -> Result<String> {
     let mut hasher = Xxh3::new();
 
@@ -141,14 +142,19 @@ pub fn compute_hash(files: &[PathBuf], extra_strings: &[String]) -> Result<Strin
         hasher.update(b"\0");
     }
 
-    Ok(format!("{:016x}", hasher.digest()))
+    Ok(format!("{:032x}", hasher.digest128()))
 }
 
-/// Compute a combined xxHash3 hash over the given files and optional extra
+/// Compute a combined xxHash3-128 hash over the given files and optional extra
 /// strings, returning a per-file breakdown alongside the combined hash.
 ///
-/// Each file is hashed once; the per-file hash is then fed into the combined
-/// hasher so that the combined result is equivalent to `compute_hash`.
+/// The combined hash feeds the same data as [`compute_hash`] and therefore
+/// always produces an identical result.  Per-file hashes are computed as a
+/// side-effect using xxHash3-64 on each file's raw contents (without the path
+/// prefix), so file contents are effectively hashed twice — once for the
+/// per-file digest and once as part of the combined stream.  This is
+/// intentional: it keeps the combined hash identical to [`compute_hash`] while
+/// still providing useful per-file breakdowns for `--verbose` output.
 pub fn compute_hash_verbose(
     files: &[PathBuf],
     extra_strings: &[String],
@@ -176,7 +182,7 @@ pub fn compute_hash_verbose(
         hasher.update(b"\0");
     }
 
-    Ok((format!("{:016x}", hasher.digest()), per_file))
+    Ok((format!("{:032x}", hasher.digest128()), per_file))
 }
 
 /// Derive a stable short name from a list of glob patterns and optional extra
@@ -210,7 +216,7 @@ pub fn derive_name(patterns: &[String], extra_strings: &[String], prefix: Option
         hasher.update(s.as_bytes());
         hasher.update(b"\0");
     }
-    format!("{:016x}", hasher.digest())[..12].to_string()
+    format!("{:032x}", hasher.digest128())[..12].to_string()
 }
 
 /// Discover the closest git repository root by walking up from `start`.
@@ -330,7 +336,7 @@ mod tests {
     #[test]
     fn test_compute_hash_empty_list() {
         let hash = compute_hash(&[], &[]).unwrap();
-        assert_eq!(hash.len(), 16); // xxHash3-64 → 16 hex chars
+        assert_eq!(hash.len(), 32); // xxHash3-128 → 32 hex chars
     }
 
     #[test]
@@ -497,6 +503,27 @@ mod tests {
     }
 
     #[test]
+    fn test_compute_hash_verbose_matches_compute_hash() {
+        let f1 = write_temp(b"hello");
+        let f2 = write_temp(b"world");
+        let files = vec![f1.path().to_path_buf(), f2.path().to_path_buf()];
+        let strings = vec!["extra".to_string()];
+
+        let hash = compute_hash(&files, &strings).unwrap();
+        let (verbose_hash, per_file) = compute_hash_verbose(&files, &strings).unwrap();
+
+        assert_eq!(
+            hash, verbose_hash,
+            "compute_hash and compute_hash_verbose must produce the same combined hash"
+        );
+        assert_eq!(
+            per_file.len(),
+            2,
+            "should have a per-file entry for each file"
+        );
+    }
+
+    #[test]
     fn test_compute_hash_verbose_with_extra_strings() {
         let f = write_temp(b"hello");
         let files = vec![f.path().to_path_buf()];
@@ -583,7 +610,7 @@ mod tests {
         let h1 = compute_hash(&[], &["version=1.0".to_string()]).unwrap();
         let h2 = compute_hash(&[], &["version=2.0".to_string()]).unwrap();
         assert_ne!(h1, h2, "different strings-only hashes should differ");
-        assert_eq!(h1.len(), 16); // xxHash3-64 → 16 hex chars
+        assert_eq!(h1.len(), 32); // xxHash3-128 → 32 hex chars
     }
 
     // ── package version resolution ──────────────────────────────────────────

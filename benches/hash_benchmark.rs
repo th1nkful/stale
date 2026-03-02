@@ -33,11 +33,11 @@ fn bench_hash_algorithms(c: &mut Criterion) {
             });
         });
 
-        group.bench_with_input(BenchmarkId::new("xxhash3", label), &data, |b, data| {
+        group.bench_with_input(BenchmarkId::new("xxhash3_128", label), &data, |b, data| {
             b.iter(|| {
                 let mut hasher = Xxh3::new();
                 hasher.update(black_box(data));
-                format!("{:016x}", hasher.digest())
+                format!("{:032x}", hasher.digest128())
             });
         });
     }
@@ -65,7 +65,7 @@ fn bench_multi_file_simulation(c: &mut Criterion) {
         });
     });
 
-    group.bench_function("xxhash3_50_files", |b| {
+    group.bench_function("xxhash3_128_50_files", |b| {
         b.iter(|| {
             let mut hasher = Xxh3::new();
             for (path, data) in paths.iter().zip(files.iter()) {
@@ -74,7 +74,7 @@ fn bench_multi_file_simulation(c: &mut Criterion) {
                 hasher.update(black_box(data));
                 hasher.update(b"\0");
             }
-            format!("{:016x}", hasher.digest())
+            format!("{:032x}", hasher.digest128())
         });
     });
 
