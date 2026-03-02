@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "docs/**"
+      - "src/**"
       - ".github/workflows/docs.yml"
   workflow_dispatch:
 
@@ -23,12 +24,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-llms-txt
+        run: cargo install cargo-llms-txt --version 0.1.1
+
       - uses: actions/configure-pages@v5
 
       - uses: actions/jekyll-build-pages@v1
         with:
           source: ./docs
           destination: ./_site
+
+      - name: Generate llms.txt files
+        run: |
+          cargo llms-txt
+          cp llms.txt llms-full.txt ./_site/
 
       - uses: actions/upload-pages-artifact@v3
 
