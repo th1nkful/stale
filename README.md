@@ -1,15 +1,15 @@
-# hash-guard
+# stale
 
 A simple Rust-based CLI tool that accepts file path/glob inputs and runs or skips a bash command depending on whether the watched files have changed since the last successful run.
 
 ## How it works
 
-`hash-guard` computes a combined SHA-256 hash over all files matched by the supplied glob patterns and compares it to a hash stored from the previous run.
+`stale` computes a combined SHA-256 hash over all files matched by the supplied glob patterns and compares it to an entry in a `.sum` file stored from the previous run.
 
 - **Files changed** (or no stored state) → the command is executed.  On success the new hash is saved.
-- **Files unchanged** → the command is skipped and `hash-guard` exits `0`.
+- **Files unchanged** → the command is skipped and `stale` exits `0`.
 
-When no command is supplied `hash-guard` exits `0` if files are unchanged and `1` if they have changed, so it composes naturally with shell `&&` / `||`.
+When no command is supplied `stale` exits `0` if files are unchanged and `1` if they have changed, so it composes naturally with shell `&&` / `||`.
 
 ## Installation
 
@@ -20,7 +20,7 @@ cargo install --path .
 ## Usage
 
 ```
-hash-guard [OPTIONS] <GLOB>... [-- <COMMAND>...]
+stale [OPTIONS] <GLOB>... [-- <COMMAND>...]
 ```
 
 ### Arguments
@@ -34,39 +34,54 @@ hash-guard [OPTIONS] <GLOB>... [-- <COMMAND>...]
 
 | Flag | Description |
 |---|---|
-| `-f, --hash-file <PATH>` | Path to the hash state file (default: `.hash-guard.json`) |
+| `-f, --sum-file <PATH>` | Path to the `.sum` file (default: `.stale.sum`) |
+| `-n, --name <NAME>` | Named entry in the sum file (default: short hash of the glob patterns) |
 | `--force` | Always run the command, even if files are unchanged |
 | `-v, --verbose` | Print per-file hashes and status messages |
 | `-h, --help` | Print help |
 | `-V, --version` | Print version |
 
+## The `.sum` file
+
+State is stored in a plain text `.sum` file (default `.stale.sum`) with one `<name> <hash>` entry per line:
+
+```
+a41dcbdfa685 e2ce01154a1476fa317b0ba5eb6b3563a3ea01e29201916212e3fef764d64c38
+lint          3f4b2c9d1a8e7b6f0d5c2a1e9f8b7a6d5e4c3b2a1f0e9d8c7b6a5f4e3d2c1b0
+test          7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8
+```
+
+- When no `--name` is given, the name is derived from a short hash of the glob patterns — the same invocation always reuses the same entry.
+- Multiple invocations in the same directory (e.g. for lint and test) each get their own named entry in the shared `.stale.sum` file.
+- You can add `.stale.sum` to `.gitignore` or commit it to share the baseline state with your team.
+
 ## Examples
 
 ```bash
 # Re-run cargo test only when .rs source files change
-hash-guard 'src/**/*.rs' -- cargo test
+stale 'src/**/*.rs' -- cargo test
 
 # Rebuild a Docker image only when relevant files change
-hash-guard Dockerfile 'src/**' -- docker build -t myapp .
+stale Dockerfile 'src/**' -- docker build -t myapp .
 
-# Reinstall Python dependencies only when requirements change
-hash-guard requirements.txt -- pip install -r requirements.txt
+# Track lint and test independently in the same directory
+stale --name lint 'src/**/*.rs' -- cargo clippy
+stale --name test 'tests/**'    -- cargo test
 
-# Use a custom state file (useful when running hash-guard multiple times
-# in the same directory for different sets of inputs)
-hash-guard -f .hg-tests.json 'tests/**' -- cargo test
+# Use a custom sum file
+stale -f .ci.sum 'src/**' -- make build
 
 # Shell composition: run a command only when files have changed
-hash-guard 'src/**/*.rs' || cargo build
+stale 'src/**/*.rs' || cargo build
 
 # Shell composition: confirm nothing has changed
-hash-guard 'config/**' && echo "Config is up to date"
+stale 'config/**' && echo "Config is up to date"
 
 # Force a run regardless of file state
-hash-guard --force 'src/**' -- cargo build
+stale --force 'src/**' -- cargo build
 
 # Verbose output showing per-file hashes
-hash-guard -v 'src/**/*.rs' -- cargo test
+stale -v 'src/**/*.rs' -- cargo test
 ```
 
 ## Exit codes
@@ -75,9 +90,6 @@ hash-guard -v 'src/**/*.rs' -- cargo test
 |---|---|
 | `0` | Files unchanged **or** command ran successfully |
 | `1` | Files changed (when no command is given) |
-| `2` | hash-guard encountered an error |
+| `2` | stale encountered an error |
 | other | Exit code forwarded from the executed command |
 
-## State file
-
-By default hash-guard stores its state in `.hash-guard.json` in the current working directory.  You can add this file to your `.gitignore` or commit it to share the baseline state with your team.

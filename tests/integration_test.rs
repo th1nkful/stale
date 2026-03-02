@@ -6,7 +6,7 @@ use tempfile::TempDir;
 /// Build a debug binary once and return its path.
 fn binary() -> String {
     let output = Command::new("cargo")
-        .args(["build", "--bin", "hash-guard"])
+        .args(["build", "--bin", "stale"])
         .output()
         .expect("Failed to run cargo build");
 
@@ -17,19 +17,18 @@ fn binary() -> String {
         );
     }
 
-    // Locate the binary relative to CARGO_MANIFEST_DIR.
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    format!("{manifest_dir}/target/debug/hash-guard")
+    format!("{manifest_dir}/target/debug/stale")
 }
 
-/// Run hash-guard in `dir` with the given arguments, returning (stdout, stderr, exit_code).
-fn run_hg(dir: &TempDir, args: &[&str]) -> (String, String, i32) {
+/// Run stale in `dir` with the given arguments, returning (stdout, stderr, exit_code).
+fn run_stale(dir: &TempDir, args: &[&str]) -> (String, String, i32) {
     let bin = binary();
     let output = Command::new(&bin)
         .args(args)
         .current_dir(dir.path())
         .output()
-        .expect("Failed to run hash-guard");
+        .expect("Failed to run stale");
 
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
@@ -45,7 +44,7 @@ fn exits_1_when_files_changed_no_command() {
     fs::write(dir.path().join("file.txt"), b"hello").unwrap();
 
     let pattern = format!("{}/*.txt", dir.path().display());
-    let (_, _, code) = run_hg(&dir, &[&pattern]);
+    let (_, _, code) = run_stale(&dir, &[&pattern]);
     assert_eq!(code, 1, "should exit 1 (files changed, no stored state)");
 }
 
@@ -56,11 +55,11 @@ fn exits_0_after_state_is_saved_no_command() {
 
     // Save state by running with a no-op command.
     let pattern = format!("{}/*.txt", dir.path().display());
-    let (_, _, code) = run_hg(&dir, &[&pattern, "--", "true"]);
+    let (_, _, code) = run_stale(&dir, &[&pattern, "--", "true"]);
     assert_eq!(code, 0);
 
     // Second check: files unchanged → exit 0.
-    let (_, _, code2) = run_hg(&dir, &[&pattern]);
+    let (_, _, code2) = run_stale(&dir, &[&pattern]);
     assert_eq!(code2, 0, "should exit 0 (files unchanged)");
 }
 
@@ -74,7 +73,7 @@ fn runs_command_when_files_changed() {
 
     let pattern = format!("{}/*.txt", dir.path().display());
     let touch_cmd = format!("touch {}", flag_file.display());
-    let (_, _, code) = run_hg(&dir, &[&pattern, "--", "sh", "-c", &touch_cmd]);
+    let (_, _, code) = run_stale(&dir, &[&pattern, "--", "sh", "-c", &touch_cmd]);
 
     assert_eq!(code, 0);
     assert!(flag_file.exists(), "command should have been executed");
@@ -87,13 +86,13 @@ fn skips_command_when_files_unchanged() {
 
     let pattern = format!("{}/*.txt", dir.path().display());
     // First run saves state.
-    let (_, _, code1) = run_hg(&dir, &[&pattern, "--", "true"]);
+    let (_, _, code1) = run_stale(&dir, &[&pattern, "--", "true"]);
     assert_eq!(code1, 0);
 
     // Second run should skip.
     let counter_file = dir.path().join("count.txt");
     let touch_cmd = format!("touch {}", counter_file.display());
-    let (_, _, code2) = run_hg(&dir, &[&pattern, "--", "sh", "-c", &touch_cmd]);
+    let (_, _, code2) = run_stale(&dir, &[&pattern, "--", "sh", "-c", &touch_cmd]);
     assert_eq!(code2, 0);
     assert!(!counter_file.exists(), "command should have been skipped");
 }
@@ -106,7 +105,7 @@ fn reruns_command_when_files_change() {
 
     let pattern = format!("{}/*.txt", dir.path().display());
     // Save state for v1.
-    let (_, _, code1) = run_hg(&dir, &[&pattern, "--", "true"]);
+    let (_, _, code1) = run_stale(&dir, &[&pattern, "--", "true"]);
     assert_eq!(code1, 0);
 
     // Modify the file.
@@ -115,7 +114,7 @@ fn reruns_command_when_files_change() {
     // Should run again.
     let flag_file = dir.path().join("ran.txt");
     let touch_cmd = format!("touch {}", flag_file.display());
-    let (_, _, code2) = run_hg(&dir, &[&pattern, "--", "sh", "-c", &touch_cmd]);
+    let (_, _, code2) = run_stale(&dir, &[&pattern, "--", "sh", "-c", &touch_cmd]);
     assert_eq!(code2, 0);
     assert!(
         flag_file.exists(),
@@ -129,13 +128,12 @@ fn does_not_save_state_when_command_fails() {
     fs::write(dir.path().join("input.txt"), b"v1").unwrap();
 
     let pattern = format!("{}/*.txt", dir.path().display());
-    // Run a failing command.
-    let (_, _, code) = run_hg(&dir, &[&pattern, "--", "false"]);
+    let (_, _, code) = run_stale(&dir, &[&pattern, "--", "false"]);
     assert_ne!(code, 0, "expected non-zero exit from failing command");
 
-    // The state file should not have been created.
-    let state = dir.path().join(".hash-guard.json");
-    assert!(!state.exists(), "state should not be saved after failure");
+    // The .sum file should not have been created.
+    let sum_file = dir.path().join(".stale.sum");
+    assert!(!sum_file.exists(), "state should not be saved after failure");
 }
 
 #[test]
@@ -145,35 +143,60 @@ fn force_flag_runs_command_even_when_unchanged() {
 
     let pattern = format!("{}/*.txt", dir.path().display());
     // Save state.
-    let (_, _, _) = run_hg(&dir, &[&pattern, "--", "true"]);
+    let (_, _, _) = run_stale(&dir, &[&pattern, "--", "true"]);
 
     let flag_file = dir.path().join("forced.txt");
     let touch_cmd = format!("touch {}", flag_file.display());
-    let (_, _, code) = run_hg(&dir, &["--force", &pattern, "--", "sh", "-c", &touch_cmd]);
+    let (_, _, code) = run_stale(&dir, &["--force", &pattern, "--", "sh", "-c", &touch_cmd]);
     assert_eq!(code, 0);
     assert!(flag_file.exists(), "--force should bypass the hash check");
 }
 
 #[test]
-fn custom_hash_file_is_used() {
+fn custom_sum_file_is_used() {
     let dir = tempfile::tempdir().unwrap();
     fs::write(dir.path().join("input.txt"), b"hello").unwrap();
 
     let pattern = format!("{}/*.txt", dir.path().display());
-    let custom_state = dir.path().join("my-state.json");
-    let (_, _, code) = run_hg(
+    let custom_sum = dir.path().join("my.sum");
+    let (_, _, code) = run_stale(
         &dir,
-        &["-f", custom_state.to_str().unwrap(), &pattern, "--", "true"],
+        &["-f", custom_sum.to_str().unwrap(), &pattern, "--", "true"],
     );
     assert_eq!(code, 0);
-    assert!(custom_state.exists(), "custom state file should be created");
+    assert!(custom_sum.exists(), "custom sum file should be created");
+}
+
+#[test]
+fn named_entries_are_independent() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("input.txt"), b"hello").unwrap();
+
+    let pattern = format!("{}/*.txt", dir.path().display());
+
+    // Save state under the name "alpha".
+    let (_, _, code1) = run_stale(&dir, &["--name", "alpha", &pattern, "--", "true"]);
+    assert_eq!(code1, 0);
+
+    // "beta" has never been run, so it should see files as changed.
+    let (_, _, code2) = run_stale(&dir, &["--name", "beta", &pattern]);
+    assert_eq!(code2, 1, "beta entry should show files as changed");
+
+    // "alpha" should still see files as unchanged.
+    let (_, _, code3) = run_stale(&dir, &["--name", "alpha", &pattern]);
+    assert_eq!(code3, 0, "alpha entry should still be unchanged");
+
+    // Both entries should coexist in the same .sum file.
+    let sum_file = dir.path().join(".stale.sum");
+    let contents = fs::read_to_string(&sum_file).unwrap();
+    assert!(contents.contains("alpha "), "alpha entry missing from sum file");
 }
 
 #[test]
 fn warns_when_no_files_matched() {
     let dir = tempfile::tempdir().unwrap();
     let pattern = format!("{}/*.rs", dir.path().display());
-    let (_, stderr, code) = run_hg(&dir, &[&pattern]);
+    let (_, stderr, code) = run_stale(&dir, &[&pattern]);
     assert_eq!(
         code, 1,
         "should exit 1 (effectively 'changed' with no prior state)"
@@ -183,3 +206,4 @@ fn warns_when_no_files_matched() {
         "should print a warning when no files match"
     );
 }
+
