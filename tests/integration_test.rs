@@ -986,3 +986,20 @@ fn git_root_entries_avoid_collision_across_subdirs() {
         "two different subdirectories should produce two distinct entries"
     );
 }
+
+// ── help command ─────────────────────────────────────────────────────────────
+
+#[test]
+fn help_command_prints_help_and_exits_0() {
+    let output = Command::new(binary())
+        .arg("help")
+        .output()
+        .expect("Failed to run stale help");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(output.status.code(), Some(0), "stale help should exit 0");
+    assert!(
+        stdout.contains("Usage"),
+        "stale help should print usage information"
+    );
+}
