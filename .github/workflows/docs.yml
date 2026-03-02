@@ -44,7 +44,7 @@ jobs:
       - name: Generate llms.txt files
         run: |
           cargo llms-txt
-          cp llms.txt llms-full.txt ./_site/
+          sudo cp llms.txt llms-full.txt ./_site/
 
       - uses: actions/upload-pages-artifact@v3
 
