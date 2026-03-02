@@ -4,7 +4,7 @@ A simple Rust-based CLI tool that accepts file path/glob inputs and runs or skip
 
 ## How it works
 
-`stale` computes a combined SHA-256 hash over all files matched by the supplied glob patterns and compares it to an entry in a `.sum` file stored from the previous run.
+`stale` computes a combined xxHash3 hash over all files matched by the supplied glob patterns and compares it to an entry in a `.sum` file stored from the previous run.
 
 - **Files changed** (or no stored state) → the command is executed.  On success the new hash is saved.
 - **Files unchanged** → the command is skipped and `stale` exits `0`.
