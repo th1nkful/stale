@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - "v*"
+      - "[0-9]*"
 
 permissions:
   contents: write
@@ -89,7 +89,7 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
         run: |
-          VERSION="${TAG#v}"
+          VERSION="${TAG}"
           URL="https://github.com/${{ github.repository }}/archive/refs/tags/${TAG}.tar.gz"
           SHA256=$(curl -fsSL "$URL" | shasum -a 256 | awk '{print $1}')
 
