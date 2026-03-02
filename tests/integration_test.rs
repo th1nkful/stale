@@ -482,8 +482,7 @@ fn recursive_glob_matches_nested_files() {
     fs::write(dir.path().join("root.txt"), b"root").unwrap();
     fs::write(sub.join("nested.txt"), b"nested").unwrap();
 
-    let pattern = format!("{}/**/*.txt", dir.path().display());
-    let (_, _, code) = run_stale(&dir, &[&pattern, "--", helper()]);
+    let (_, _, code) = run_stale(&dir, &["**/*.txt", "--", helper()]);
     assert_eq!(code, 0, "recursive glob should match nested files");
 }
 
@@ -494,10 +493,8 @@ fn recursive_glob_detects_nested_change() {
     fs::create_dir_all(&sub).unwrap();
     fs::write(sub.join("file.txt"), b"v1").unwrap();
 
-    let pattern = format!("{}/**/*.txt", dir.path().display());
-
     // First run saves state.
-    let (_, _, code1) = run_stale(&dir, &[&pattern, "--", helper()]);
+    let (_, _, code1) = run_stale(&dir, &["**/*.txt", "--", helper()]);
     assert_eq!(code1, 0);
 
     // Modify nested file.
@@ -507,7 +504,13 @@ fn recursive_glob_detects_nested_change() {
     let flag = dir.path().join("ran.txt");
     let (_, _, code2) = run_stale(
         &dir,
-        &[&pattern, "--", helper(), "--touch", flag.to_str().unwrap()],
+        &[
+            "**/*.txt",
+            "--",
+            helper(),
+            "--touch",
+            flag.to_str().unwrap(),
+        ],
     );
     assert_eq!(code2, 0);
     assert!(
