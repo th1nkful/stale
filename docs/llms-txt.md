@@ -12,8 +12,8 @@ Two files are regenerated on every push to `main` and served as part of this sit
 
 | File | Description |
 |---|---|
-| [`/llms.txt`](https://th1nkful.github.io/stale/llms.txt) | Concise project overview, dependency list, and public API summary |
-| [`/llms-full.txt`](https://th1nkful.github.io/stale/llms-full.txt) | Complete public API documentation with full function signatures and doc comments |
+| [`/llms.txt`]({{ "/llms.txt" | relative_url }}) | Concise project overview, dependency list, and public API summary |
+| [`/llms-full.txt`]({{ "/llms-full.txt" | relative_url }}) | Complete public API documentation with full function signatures and doc comments |
 
 ## Example (`llms.txt`)
 
@@ -22,19 +22,14 @@ Two files are regenerated on every push to `main` and served as part of this sit
 
 > A CLI tool to run or skip commands based on file content hashes
 
-**Version:** 0.1.0
+**Version:** x.y.z
 **License:** Apache-2.0
 **Repository:** https://github.com/th1nkful/stale
-**Dependencies:**
-- glob (0.3)
-- sha2 (0.10)
-- clap (4.5) [features: derive]
-- hex (0.4)
-- toml (0.8)
-- serde_json (1.0)
-- anyhow (1.0)
+**Dependencies:** (example subset)
+- dependency-a (1.0)
+- dependency-b (2.0)
 
-Generated: 2026-03-02 19:50:11 UTC
+Generated: <TIMESTAMP>
 Created by: cargo-llms-txt (https://github.com/masinc/cargo-llms-txt)
 
 ## Core Documentation
