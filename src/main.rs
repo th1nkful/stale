@@ -38,15 +38,19 @@ struct Cli {
     /// Path to the .sum file used to store hash state.
     ///
     /// When omitted, stale discovers the closest git repository root (by
-    /// walking up to find a `.git` directory) and stores `.stale.sum` there.
-    /// If no git root is found the file is stored in the current directory.
+    /// walking up to find a `.git` entry) and stores `.stale.sum` there.
+    /// The search stops at the user's home directory to avoid escaping the
+    /// project tree.  If no git root is found the file is stored in the
+    /// current directory.
     #[arg(short = 'f', long, value_name = "PATH")]
     sum_file: Option<PathBuf>,
 
     /// Name for this entry in the .sum file.
     ///
-    /// Defaults to a short hash derived from the supplied glob patterns so
-    /// repeated invocations with the same patterns always reuse the same entry.
+    /// Defaults to a short hash derived from the supplied glob patterns and,
+    /// when using git-root discovery, the working directory relative to the
+    /// repository root.  This ensures that the same patterns run from different
+    /// subdirectories produce distinct entries in the shared `.sum` file.
     #[arg(short, long, value_name = "NAME")]
     name: Option<String>,
 
@@ -73,7 +77,10 @@ fn run(cli: Cli) -> Result<i32> {
     let (sum_file, name_prefix) = match cli.sum_file {
         Some(ref path) => (path.clone(), None),
         None => {
-            if let Some(git_root) = find_git_root(&cwd) {
+            let home = std::env::var_os("HOME")
+                .or_else(|| std::env::var_os("USERPROFILE"))
+                .map(PathBuf::from);
+            if let Some(git_root) = find_git_root(&cwd, home.as_deref()) {
                 let rel = cwd
                     .strip_prefix(&git_root)
                     .ok()

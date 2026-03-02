@@ -35,7 +35,7 @@ stale [OPTIONS] <GLOB>... [-- <COMMAND>...]
 | Flag | Description |
 |---|---|
 | `-f, --sum-file <PATH>` | Path to the `.sum` file (default: `.stale.sum` at the git root, or the current directory if not inside a git repository) |
-| `-n, --name <NAME>` | Named entry in the sum file (default: short hash of the glob patterns) |
+| `-n, --name <NAME>` | Named entry in the sum file (default: short hash of the glob patterns and, when using git-root discovery, the working directory relative to the repository root) |
 | `--force` | Always run the command, even if files are unchanged |
 | `-v, --verbose` | Print per-file hashes and status messages |
 | `-h, --help` | Print help |
@@ -45,10 +45,13 @@ stale [OPTIONS] <GLOB>... [-- <COMMAND>...]
 
 State is stored in a plain text `.sum` file (default `.stale.sum`).  By
 default `stale` walks up the directory tree to find the closest git
-repository root (a directory containing `.git`) and places the file there,
+repository root (a directory containing a `.git` entry — either a directory
+or a file, as used by worktrees and submodules) and places the file there,
 so you get a single `.stale.sum` per repository instead of one in every
-directory.  If no git root is found, the file is stored in the current
-directory.  You can override this with `-f`.
+directory.  The search stops at the user's home directory (`$HOME` /
+`%USERPROFILE%`) to avoid escaping the project tree.  If no git root is
+found, the file is stored in the current directory.  You can override this
+with `-f`.
 
 The file contains one `<name> <hash>` entry per line:
 

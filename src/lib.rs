@@ -102,11 +102,23 @@ pub fn derive_name(patterns: &[String], prefix: Option<&str>) -> String {
 
 /// Discover the closest git repository root by walking up from `start`.
 ///
-/// Returns `Some(path)` when a directory containing `.git` is found,
-/// or `None` if the filesystem root is reached without finding one.
-pub fn find_git_root(start: &Path) -> Option<PathBuf> {
+/// Returns `Some(path)` when a directory containing a `.git` entry is found.
+/// The `.git` entry may be either a directory (normal repositories) or a file
+/// (git worktrees and submodules).
+///
+/// When `ceiling` is provided the search stops before reaching that directory,
+/// preventing the walk from escaping beyond a known boundary (e.g. the user's
+/// home directory).  If `ceiling` is `None` the walk continues to the
+/// filesystem root.
+pub fn find_git_root(start: &Path, ceiling: Option<&Path>) -> Option<PathBuf> {
     let mut current = start.to_path_buf();
     loop {
+        // Stop before reaching the ceiling directory.
+        if let Some(c) = ceiling {
+            if current == c {
+                return None;
+            }
+        }
         if current.join(".git").exists() {
             return Some(current);
         }
@@ -333,7 +345,7 @@ mod tests {
     fn test_find_git_root_found() {
         let dir = tempfile::tempdir().unwrap();
         fs::create_dir(dir.path().join(".git")).unwrap();
-        let result = find_git_root(dir.path());
+        let result = find_git_root(dir.path(), None);
         assert_eq!(result, Some(dir.path().to_path_buf()));
     }
 
@@ -343,7 +355,7 @@ mod tests {
         fs::create_dir(dir.path().join(".git")).unwrap();
         let sub = dir.path().join("a").join("b");
         fs::create_dir_all(&sub).unwrap();
-        let result = find_git_root(&sub);
+        let result = find_git_root(&sub, None);
         assert_eq!(result, Some(dir.path().to_path_buf()));
     }
 
@@ -351,7 +363,7 @@ mod tests {
     fn test_find_git_root_not_found() {
         let dir = tempfile::tempdir().unwrap();
         // No .git directory in this temp dir.
-        let result = find_git_root(dir.path());
+        let result = find_git_root(dir.path(), None);
         // It may return an ancestor if the test runner itself lives inside a
         // git repository, but it must never return the temp dir itself and any
         // returned path must actually contain `.git`.
@@ -362,6 +374,19 @@ mod tests {
                 assert_ne!(root, &dir.path().to_path_buf());
             }
         }
+    }
+
+    #[test]
+    fn test_find_git_root_stops_at_ceiling() {
+        let dir = tempfile::tempdir().unwrap();
+        // .git is at the root of the temp dir.
+        fs::create_dir(dir.path().join(".git")).unwrap();
+        let sub = dir.path().join("a").join("b");
+        fs::create_dir_all(&sub).unwrap();
+        // The ceiling is between our start and the .git directory.
+        let ceiling = dir.path().join("a");
+        let result = find_git_root(&sub, Some(&ceiling));
+        assert_eq!(result, None, "should not search above the ceiling");
     }
 
     #[test]

@@ -17,9 +17,15 @@ fn helper() -> &'static str {
 }
 
 /// Run stale in `dir` with the given arguments, returning (stdout, stderr, exit_code).
+///
+/// An explicit `-f <dir>/.stale.sum` is always prepended so tests are isolated
+/// from any `.git` ancestor that might exist in the host environment.
 fn run_stale(dir: &TempDir, args: &[&str]) -> (String, String, i32) {
     let bin = binary();
-    let output = Command::new(&bin)
+    let sum_file = dir.path().join(".stale.sum");
+    let output = Command::new(bin)
+        .arg("-f")
+        .arg(&sum_file)
         .args(args)
         .current_dir(dir.path())
         .output()
@@ -154,11 +160,12 @@ fn custom_sum_file_is_used() {
     fs::write(dir.path().join("input.txt"), b"hello").unwrap();
 
     let custom_sum = dir.path().join("my.sum");
-    let (_, _, code) = run_stale(
-        &dir,
-        &["-f", custom_sum.to_str().unwrap(), "*.txt", "--", helper()],
-    );
-    assert_eq!(code, 0);
+    let output = Command::new(binary())
+        .args(["-f", custom_sum.to_str().unwrap(), "*.txt", "--", helper()])
+        .current_dir(dir.path())
+        .output()
+        .expect("Failed to run stale");
+    assert_eq!(output.status.code(), Some(0));
     assert!(custom_sum.exists(), "custom sum file should be created");
 }
 
