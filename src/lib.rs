@@ -182,8 +182,17 @@ pub fn compute_hash_verbose(
 /// a deterministic identifier so repeated invocations with the same patterns
 /// and strings always map to the same entry in the `.sum` file without
 /// requiring the user to supply `--name`.
-pub fn derive_name(patterns: &[String], extra_strings: &[String]) -> String {
+///
+/// When `prefix` is supplied (e.g. the working directory relative to the git
+/// root), it is mixed into the hash so that running the same glob patterns
+/// from different subdirectories produces distinct entries and avoids
+/// collisions in a shared `.sum` file.
+pub fn derive_name(patterns: &[String], extra_strings: &[String], prefix: Option<&str>) -> String {
     let mut hasher = Sha256::new();
+    if let Some(p) = prefix {
+        hasher.update(p.as_bytes());
+        hasher.update(b"\0");
+    }
     let mut sorted = patterns.to_vec();
     sorted.sort();
     for p in &sorted {
@@ -195,6 +204,34 @@ pub fn derive_name(patterns: &[String], extra_strings: &[String]) -> String {
         hasher.update(b"\n");
     }
     hex::encode(hasher.finalize())[..12].to_string()
+}
+
+/// Discover the closest git repository root by walking up from `start`.
+///
+/// Returns `Some(path)` when a directory containing a `.git` entry is found.
+/// The `.git` entry may be either a directory (normal repositories) or a file
+/// (git worktrees and submodules).
+///
+/// When `ceiling` is provided the search stops before reaching that directory,
+/// preventing the walk from escaping beyond a known boundary (e.g. the user's
+/// home directory).  If `ceiling` is `None` the walk continues to the
+/// filesystem root.
+pub fn find_git_root(start: &Path, ceiling: Option<&Path>) -> Option<PathBuf> {
+    let mut current = start.to_path_buf();
+    loop {
+        // Stop before reaching the ceiling directory.
+        if let Some(c) = ceiling {
+            if current == c {
+                return None;
+            }
+        }
+        if current.join(".git").exists() {
+            return Some(current);
+        }
+        if !current.pop() {
+            return None;
+        }
+    }
 }
 
 /// Look up the hash stored for `name` in the `.sum` file at `path`.
@@ -387,16 +424,16 @@ mod tests {
     #[test]
     fn test_derive_name_stable() {
         let patterns = vec!["src/**/*.rs".to_string(), "tests/**".to_string()];
-        let n1 = derive_name(&patterns, &[]);
-        let n2 = derive_name(&patterns, &[]);
+        let n1 = derive_name(&patterns, &[], None);
+        let n2 = derive_name(&patterns, &[], None);
         assert_eq!(n1, n2);
         assert_eq!(n1.len(), 12);
     }
 
     #[test]
     fn test_derive_name_order_independent() {
-        let a = derive_name(&["src/**".to_string(), "tests/**".to_string()], &[]);
-        let b = derive_name(&["tests/**".to_string(), "src/**".to_string()], &[]);
+        let a = derive_name(&["src/**".to_string(), "tests/**".to_string()], &[], None);
+        let b = derive_name(&["tests/**".to_string(), "src/**".to_string()], &[], None);
         assert_eq!(a, b);
     }
 
@@ -464,10 +501,74 @@ mod tests {
     #[test]
     fn test_derive_name_with_strings() {
         let patterns = vec!["src/**".to_string()];
-        let n1 = derive_name(&patterns, &[]);
-        let n2 = derive_name(&patterns, &["v1.0.0".to_string()]);
+        let n1 = derive_name(&patterns, &[], None);
+        let n2 = derive_name(&patterns, &["v1.0.0".to_string()], None);
         assert_ne!(n1, n2, "extra strings should change the derived name");
         assert_eq!(n2.len(), 12);
+    }
+
+    #[test]
+    fn test_derive_name_with_prefix_differs() {
+        let patterns = vec!["*.txt".to_string()];
+        let without = derive_name(&patterns, &[], None);
+        let with_a = derive_name(&patterns, &[], Some("subdir_a"));
+        let with_b = derive_name(&patterns, &[], Some("subdir_b"));
+        assert_ne!(without, with_a, "prefix should change the derived name");
+        assert_ne!(
+            with_a, with_b,
+            "different prefixes should produce different names"
+        );
+    }
+
+    #[test]
+    fn test_find_git_root_found() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir(dir.path().join(".git")).unwrap();
+        let result = find_git_root(dir.path(), None);
+        assert_eq!(result, Some(dir.path().to_path_buf()));
+    }
+
+    #[test]
+    fn test_find_git_root_found_in_parent() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir(dir.path().join(".git")).unwrap();
+        let sub = dir.path().join("a").join("b");
+        fs::create_dir_all(&sub).unwrap();
+        let result = find_git_root(&sub, None);
+        assert_eq!(result, Some(dir.path().to_path_buf()));
+    }
+
+    #[test]
+    fn test_find_git_root_not_found() {
+        let dir = tempfile::tempdir().unwrap();
+        // No .git directory in this temp dir.
+        let result = find_git_root(dir.path(), None);
+        // It may return an ancestor if the test runner itself lives inside a
+        // git repository, but it must never return the temp dir itself and any
+        // returned path must actually contain `.git`.
+        match result {
+            None => {} // expected in most environments
+            Some(ref root) => {
+                assert!(
+                    root.join(".git").exists(),
+                    "returned root must contain .git"
+                );
+                assert_ne!(root, &dir.path().to_path_buf());
+            }
+        }
+    }
+
+    #[test]
+    fn test_find_git_root_stops_at_ceiling() {
+        let dir = tempfile::tempdir().unwrap();
+        // .git is at the root of the temp dir.
+        fs::create_dir(dir.path().join(".git")).unwrap();
+        let sub = dir.path().join("a").join("b");
+        fs::create_dir_all(&sub).unwrap();
+        // The ceiling is between our start and the .git directory.
+        let ceiling = dir.path().join("a");
+        let result = find_git_root(&sub, Some(&ceiling));
+        assert_eq!(result, None, "should not search above the ceiling");
     }
 
     #[test]

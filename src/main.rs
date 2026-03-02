@@ -1,10 +1,10 @@
 use anyhow::{Context, Result};
 use clap::Parser;
 use stale::{
-    compute_hash, compute_hash_verbose, derive_name, expand_globs, load_sum_entry,
+    compute_hash, compute_hash_verbose, derive_name, expand_globs, find_git_root, load_sum_entry,
     resolve_pkg_version, save_sum_entry,
 };
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process;
 
 /// stale — run or skip a command based on whether watched files have changed.
@@ -39,13 +39,21 @@ struct Cli {
     globs: Vec<String>,
 
     /// Path to the .sum file used to store hash state.
-    #[arg(short = 'f', long, default_value = ".stale.sum", value_name = "PATH")]
-    sum_file: PathBuf,
+    ///
+    /// When omitted, stale discovers the closest git repository root (by
+    /// walking up to find a `.git` entry) and stores `.stale.sum` there.
+    /// The search stops at the user's home directory to avoid escaping the
+    /// project tree.  If no git root is found the file is stored in the
+    /// current directory.
+    #[arg(short = 'f', long, value_name = "PATH")]
+    sum_file: Option<PathBuf>,
 
     /// Name for this entry in the .sum file.
     ///
-    /// Defaults to a short hash derived from the supplied glob patterns so
-    /// repeated invocations with the same patterns always reuse the same entry.
+    /// Defaults to a short hash derived from the supplied glob patterns and,
+    /// when using git-root discovery, the working directory relative to the
+    /// repository root.  This ensures that the same patterns run from different
+    /// subdirectories produce distinct entries in the shared `.sum` file.
     #[arg(short, long, value_name = "NAME")]
     name: Option<String>,
 
@@ -77,8 +85,32 @@ struct Cli {
 }
 
 fn run(cli: Cli) -> Result<i32> {
-    // Resolve package version queries into concrete version strings.
+    // Resolve the sum-file location.
+    //
+    // When the user supplies `-f`, use that path directly.  Otherwise walk up
+    // to find the nearest git root and place `.stale.sum` there.  If no git
+    // root is found, fall back to the current directory.
     let cwd = std::env::current_dir().context("Failed to determine current directory")?;
+    let (sum_file, name_prefix) = match cli.sum_file {
+        Some(ref path) => (path.clone(), None),
+        None => {
+            let home = std::env::var_os("HOME")
+                .or_else(|| std::env::var_os("USERPROFILE"))
+                .map(PathBuf::from);
+            if let Some(git_root) = find_git_root(&cwd, home.as_deref()) {
+                let rel = cwd
+                    .strip_prefix(&git_root)
+                    .ok()
+                    .filter(|r| *r != Path::new(""))
+                    .map(|r| r.to_string_lossy().into_owned());
+                (git_root.join(".stale.sum"), rel)
+            } else {
+                (PathBuf::from(".stale.sum"), None)
+            }
+        }
+    };
+
+    // Resolve package version queries into concrete version strings.
     let mut all_strings = cli.strings.clone();
     for query in &cli.packages {
         let version = resolve_pkg_version(query, &cwd)?;
@@ -89,10 +121,13 @@ fn run(cli: Cli) -> Result<i32> {
     }
 
     // Resolve the entry name: explicit flag > derived from glob patterns + strings.
+    // When using git-root discovery, the relative path from the git root to
+    // the working directory is mixed into the derived name so that identical
+    // glob patterns run from different subdirectories do not collide.
     let name = cli
         .name
         .clone()
-        .unwrap_or_else(|| derive_name(&cli.globs, &all_strings));
+        .unwrap_or_else(|| derive_name(&cli.globs, &all_strings, name_prefix.as_deref()));
 
     // Expand globs to a sorted, deduplicated file list.
     let files = expand_globs(&cli.globs)?;
@@ -118,7 +153,7 @@ fn run(cli: Cli) -> Result<i32> {
     }
 
     // Load the stored hash for this named entry (if any).
-    let stored_hash = load_sum_entry(&cli.sum_file, &name)?;
+    let stored_hash = load_sum_entry(&sum_file, &name)?;
     let unchanged = stored_hash.as_deref() == Some(current_hash.as_str());
 
     if unchanged && !cli.force {
@@ -158,9 +193,9 @@ fn run(cli: Cli) -> Result<i32> {
 
     // Only persist the new hash when the command succeeded.
     if status.success() {
-        save_sum_entry(&cli.sum_file, &name, &current_hash)?;
+        save_sum_entry(&sum_file, &name, &current_hash)?;
         if cli.verbose {
-            eprintln!("stale: state saved to {}", cli.sum_file.display());
+            eprintln!("stale: state saved to {}", sum_file.display());
         }
     } else if cli.verbose {
         eprintln!("stale: command exited with code {code}; state not saved");
