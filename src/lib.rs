@@ -350,12 +350,18 @@ mod tests {
     #[test]
     fn test_find_git_root_not_found() {
         let dir = tempfile::tempdir().unwrap();
-        // No .git directory anywhere in this temp dir.
+        // No .git directory in this temp dir.
         let result = find_git_root(dir.path());
-        // The temp dir is typically under /tmp which has no .git,
-        // but the test runner's working directory might.  We check
-        // that at least the *dir itself* is not returned.
-        assert_ne!(result, Some(dir.path().to_path_buf()));
+        // It may return an ancestor if the test runner itself lives inside a
+        // git repository, but it must never return the temp dir itself and any
+        // returned path must actually contain `.git`.
+        match result {
+            None => {} // expected in most environments
+            Some(ref root) => {
+                assert!(root.join(".git").exists(), "returned root must contain .git");
+                assert_ne!(root, &dir.path().to_path_buf());
+            }
+        }
     }
 
     #[test]

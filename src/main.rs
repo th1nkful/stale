@@ -4,7 +4,7 @@ use stale::{
     compute_hash, compute_hash_verbose, derive_name, expand_globs, find_git_root, load_sum_entry,
     save_sum_entry,
 };
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process;
 
 /// stale — run or skip a command based on whether watched files have changed.
@@ -77,14 +77,8 @@ fn run(cli: Cli) -> Result<i32> {
                 let rel = cwd
                     .strip_prefix(&git_root)
                     .ok()
-                    .and_then(|r| {
-                        let s = r.to_string_lossy();
-                        if s.is_empty() {
-                            None
-                        } else {
-                            Some(s.into_owned())
-                        }
-                    });
+                    .filter(|r| *r != Path::new(""))
+                    .map(|r| r.to_string_lossy().into_owned());
                 (git_root.join(".stale.sum"), rel)
             } else {
                 (PathBuf::from(".stale.sum"), None)
