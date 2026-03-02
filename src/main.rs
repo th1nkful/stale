@@ -205,6 +205,12 @@ fn run(cli: Cli) -> Result<i32> {
 }
 
 fn main() {
+    // Support `stale help` as an alias for `stale --help`.
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() == 2 && args[1] == "help" {
+        Cli::parse_from(["stale", "--help"]);
+    }
+
     let cli = Cli::parse();
 
     match run(cli) {
