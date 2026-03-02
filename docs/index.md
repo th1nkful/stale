@@ -6,7 +6,7 @@ nav_order: 1
 
 # stale
 
-A simple Rust-based CLI tool that accepts file path/glob inputs and runs or skips a bash command depending on whether the watched files have changed since the last successful run.
+A simple Rust-based CLI tool that accepts file path/glob inputs and runs or skips a command depending on whether the watched files have changed since the last successful run.
 {: .fs-6 .fw-300 }
 
 ---

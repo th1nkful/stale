@@ -70,7 +70,7 @@ stale -s "$(jq -r '.dependencies.express' package.json)" 'src/**' -- npm test
 # Environment-dependent strings
 stale -s "$NODE_ENV" -s "$(cat .tool-versions)" 'src/**' -- make build
 
-# Shell composition: run a command only when files have changed
+# Shell composition: run a command when files have changed (also runs on errors)
 stale 'src/**/*.rs' || cargo build
 
 # Shell composition: confirm nothing has changed
