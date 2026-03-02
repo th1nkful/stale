@@ -13,6 +13,14 @@ When no command is supplied `stale` exits `0` if files are unchanged and `1` if 
 
 ## Installation
 
+### Homebrew (macOS/Linux)
+
+```bash
+brew install th1nkful/stale/stale
+```
+
+### From source
+
 ```bash
 cargo install --path .
 ```
