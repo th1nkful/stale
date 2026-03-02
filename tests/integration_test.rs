@@ -66,7 +66,13 @@ fn runs_command_when_files_changed() {
 
     let (_, _, code) = run_stale(
         &dir,
-        &["*.txt", "--", helper(), "--touch", flag_file.to_str().unwrap()],
+        &[
+            "*.txt",
+            "--",
+            helper(),
+            "--touch",
+            flag_file.to_str().unwrap(),
+        ],
     );
 
     assert_eq!(code, 0);
@@ -86,7 +92,13 @@ fn skips_command_when_files_unchanged() {
     let counter_file = dir.path().join("count.txt");
     let (_, _, code2) = run_stale(
         &dir,
-        &["*.txt", "--", helper(), "--touch", counter_file.to_str().unwrap()],
+        &[
+            "*.txt",
+            "--",
+            helper(),
+            "--touch",
+            counter_file.to_str().unwrap(),
+        ],
     );
     assert_eq!(code2, 0);
     assert!(!counter_file.exists(), "command should have been skipped");
@@ -109,7 +121,13 @@ fn reruns_command_when_files_change() {
     let flag_file = dir.path().join("ran.txt");
     let (_, _, code2) = run_stale(
         &dir,
-        &["*.txt", "--", helper(), "--touch", flag_file.to_str().unwrap()],
+        &[
+            "*.txt",
+            "--",
+            helper(),
+            "--touch",
+            flag_file.to_str().unwrap(),
+        ],
     );
     assert_eq!(code2, 0);
     assert!(
@@ -128,7 +146,10 @@ fn does_not_save_state_when_command_fails() {
 
     // The .sum file should not have been created.
     let sum_file = dir.path().join(".stale.sum");
-    assert!(!sum_file.exists(), "state should not be saved after failure");
+    assert!(
+        !sum_file.exists(),
+        "state should not be saved after failure"
+    );
 }
 
 #[test]
@@ -142,7 +163,14 @@ fn force_flag_runs_command_even_when_unchanged() {
     let flag_file = dir.path().join("forced.txt");
     let (_, _, code) = run_stale(
         &dir,
-        &["--force", "*.txt", "--", helper(), "--touch", flag_file.to_str().unwrap()],
+        &[
+            "--force",
+            "*.txt",
+            "--",
+            helper(),
+            "--touch",
+            flag_file.to_str().unwrap(),
+        ],
     );
     assert_eq!(code, 0);
     assert!(flag_file.exists(), "--force should bypass the hash check");
@@ -182,7 +210,10 @@ fn named_entries_are_independent() {
     // Both entries should coexist in the same .sum file.
     let sum_file = dir.path().join(".stale.sum");
     let contents = fs::read_to_string(&sum_file).unwrap();
-    assert!(contents.contains("alpha "), "alpha entry missing from sum file");
+    assert!(
+        contents.contains("alpha "),
+        "alpha entry missing from sum file"
+    );
 }
 
 #[test]
@@ -198,4 +229,3 @@ fn warns_when_no_files_matched() {
         "should print a warning when no files match"
     );
 }
-

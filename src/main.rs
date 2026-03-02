@@ -35,12 +35,7 @@ struct Cli {
     globs: Vec<String>,
 
     /// Path to the .sum file used to store hash state.
-    #[arg(
-        short = 'f',
-        long,
-        default_value = ".stale.sum",
-        value_name = "PATH"
-    )]
+    #[arg(short = 'f', long, default_value = ".stale.sum", value_name = "PATH")]
     sum_file: PathBuf,
 
     /// Name for this entry in the .sum file.
@@ -65,10 +60,7 @@ struct Cli {
 
 fn run(cli: Cli) -> Result<i32> {
     // Resolve the entry name: explicit flag > derived from glob patterns.
-    let name = cli
-        .name
-        .clone()
-        .unwrap_or_else(|| derive_name(&cli.globs));
+    let name = cli.name.clone().unwrap_or_else(|| derive_name(&cli.globs));
 
     // Expand globs to a sorted, deduplicated file list.
     let files = expand_globs(&cli.globs)?;
@@ -156,4 +148,3 @@ fn main() {
         }
     }
 }
-
