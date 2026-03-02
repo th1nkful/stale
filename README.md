@@ -16,6 +16,7 @@ When no command is supplied `stale` exits `0` if files are unchanged and `1` if 
 ### Homebrew (macOS/Linux)
 
 ```bash
+brew tap th1nkful/stale https://github.com/th1nkful/stale
 brew install th1nkful/stale/stale
 ```
 
