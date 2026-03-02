@@ -121,50 +121,42 @@ pub fn load_sum_entry(path: &Path, name: &str) -> Result<Option<String>> {
 
 /// Write (or update) the `name` entry in the `.sum` file at `path`.
 ///
-/// If the file already contains an entry for `name` it is replaced in-place;
-/// otherwise a new line is appended.
+/// The file is always rewritten with all entries sorted by name so the output
+/// is stable and deterministic regardless of insertion order.
 pub fn save_sum_entry(path: &Path, name: &str, hash: &str) -> Result<()> {
-    let new_line = format!("{name} {hash}");
-
-    if path.exists() {
+    // Collect existing entries, skipping comments and blank lines.
+    let mut entries: Vec<(String, String)> = if path.exists() {
         let contents = fs::read_to_string(path)
             .with_context(|| format!("Failed to read sum file {}", path.display()))?;
-
-        let mut replaced = false;
-        let updated: String = contents
+        contents
             .lines()
-            .map(|line| {
+            .filter_map(|line| {
                 let trimmed = line.trim();
-                if !trimmed.is_empty()
-                    && !trimmed.starts_with('#')
-                    && trimmed.split_once(' ').map(|(n, _)| n) == Some(name)
-                {
-                    replaced = true;
-                    new_line.clone()
+                if trimmed.is_empty() || trimmed.starts_with('#') {
+                    None
                 } else {
-                    line.to_string()
+                    trimmed
+                        .split_once(' ')
+                        .map(|(n, h)| (n.to_string(), h.trim().to_string()))
                 }
             })
-            .collect::<Vec<_>>()
-            .join("\n");
+            .filter(|(n, _)| n != name) // remove the entry we're about to upsert
+            .collect()
+    } else {
+        Vec::new()
+    };
 
-        if replaced {
-            // Preserve a trailing newline if the original had one.
-            let trailing = if contents.ends_with('\n') { "\n" } else { "" };
-            fs::write(path, format!("{updated}{trailing}"))
-                .with_context(|| format!("Failed to write sum file {}", path.display()))?;
-            return Ok(());
-        }
-    }
+    entries.push((name.to_string(), hash.to_string()));
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
 
-    // Append (or create) the entry.
-    use std::io::Write;
-    let mut file = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .with_context(|| format!("Failed to open sum file {}", path.display()))?;
-    writeln!(file, "{new_line}")
+    let contents: String = entries
+        .iter()
+        .map(|(n, h)| format!("{n} {h}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+
+    fs::write(path, contents)
         .with_context(|| format!("Failed to write sum file {}", path.display()))?;
 
     Ok(())
@@ -240,6 +232,22 @@ mod tests {
         // Only one entry should exist for this name.
         let contents = fs::read_to_string(&sum_path).unwrap();
         assert_eq!(contents.lines().count(), 1);
+    }
+
+    #[test]
+    fn test_sum_file_is_sorted() {
+        let dir = tempfile::tempdir().unwrap();
+        let sum_path = dir.path().join("state.sum");
+        // Insert in reverse alphabetical order.
+        save_sum_entry(&sum_path, "zebra", "hash-z").unwrap();
+        save_sum_entry(&sum_path, "mango", "hash-m").unwrap();
+        save_sum_entry(&sum_path, "apple", "hash-a").unwrap();
+        let contents = fs::read_to_string(&sum_path).unwrap();
+        let names: Vec<&str> = contents
+            .lines()
+            .filter_map(|l| l.split_once(' ').map(|(n, _)| n))
+            .collect();
+        assert_eq!(names, vec!["apple", "mango", "zebra"]);
     }
 
     #[test]
