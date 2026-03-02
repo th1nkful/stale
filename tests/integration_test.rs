@@ -66,7 +66,13 @@ fn runs_command_when_files_changed() {
 
     let (_, _, code) = run_stale(
         &dir,
-        &["*.txt", "--", helper(), "--touch", flag_file.to_str().unwrap()],
+        &[
+            "*.txt",
+            "--",
+            helper(),
+            "--touch",
+            flag_file.to_str().unwrap(),
+        ],
     );
 
     assert_eq!(code, 0);
@@ -86,7 +92,13 @@ fn skips_command_when_files_unchanged() {
     let counter_file = dir.path().join("count.txt");
     let (_, _, code2) = run_stale(
         &dir,
-        &["*.txt", "--", helper(), "--touch", counter_file.to_str().unwrap()],
+        &[
+            "*.txt",
+            "--",
+            helper(),
+            "--touch",
+            counter_file.to_str().unwrap(),
+        ],
     );
     assert_eq!(code2, 0);
     assert!(!counter_file.exists(), "command should have been skipped");
@@ -109,7 +121,13 @@ fn reruns_command_when_files_change() {
     let flag_file = dir.path().join("ran.txt");
     let (_, _, code2) = run_stale(
         &dir,
-        &["*.txt", "--", helper(), "--touch", flag_file.to_str().unwrap()],
+        &[
+            "*.txt",
+            "--",
+            helper(),
+            "--touch",
+            flag_file.to_str().unwrap(),
+        ],
     );
     assert_eq!(code2, 0);
     assert!(
@@ -128,7 +146,10 @@ fn does_not_save_state_when_command_fails() {
 
     // The .sum file should not have been created.
     let sum_file = dir.path().join(".stale.sum");
-    assert!(!sum_file.exists(), "state should not be saved after failure");
+    assert!(
+        !sum_file.exists(),
+        "state should not be saved after failure"
+    );
 }
 
 #[test]
@@ -142,7 +163,14 @@ fn force_flag_runs_command_even_when_unchanged() {
     let flag_file = dir.path().join("forced.txt");
     let (_, _, code) = run_stale(
         &dir,
-        &["--force", "*.txt", "--", helper(), "--touch", flag_file.to_str().unwrap()],
+        &[
+            "--force",
+            "*.txt",
+            "--",
+            helper(),
+            "--touch",
+            flag_file.to_str().unwrap(),
+        ],
     );
     assert_eq!(code, 0);
     assert!(flag_file.exists(), "--force should bypass the hash check");
@@ -182,7 +210,10 @@ fn named_entries_are_independent() {
     // Both entries should coexist in the same .sum file.
     let sum_file = dir.path().join(".stale.sum");
     let contents = fs::read_to_string(&sum_file).unwrap();
-    assert!(contents.contains("alpha "), "alpha entry missing from sum file");
+    assert!(
+        contents.contains("alpha "),
+        "alpha entry missing from sum file"
+    );
 }
 
 #[test]
@@ -225,10 +256,19 @@ fn exact_file_unchanged_skips_command() {
     let flag = dir.path().join("ran.txt");
     let (_, _, code2) = run_stale(
         &dir,
-        &[file.to_str().unwrap(), "--", helper(), "--touch", flag.to_str().unwrap()],
+        &[
+            file.to_str().unwrap(),
+            "--",
+            helper(),
+            "--touch",
+            flag.to_str().unwrap(),
+        ],
     );
     assert_eq!(code2, 0);
-    assert!(!flag.exists(), "command should be skipped for unchanged exact file");
+    assert!(
+        !flag.exists(),
+        "command should be skipped for unchanged exact file"
+    );
 }
 
 #[test]
@@ -258,7 +298,15 @@ fn package_version_string_triggers_rerun() {
     // First run with express@4.18.0.
     let (_, _, code1) = run_stale(
         &dir,
-        &["-s", "express@4.18.0", "--name", "pkg", "*.js", "--", helper()],
+        &[
+            "-s",
+            "express@4.18.0",
+            "--name",
+            "pkg",
+            "*.js",
+            "--",
+            helper(),
+        ],
     );
     assert_eq!(code1, 0);
 
@@ -266,7 +314,17 @@ fn package_version_string_triggers_rerun() {
     let flag = dir.path().join("ran.txt");
     let (_, _, code2) = run_stale(
         &dir,
-        &["-s", "express@4.18.0", "--name", "pkg", "*.js", "--", helper(), "--touch", flag.to_str().unwrap()],
+        &[
+            "-s",
+            "express@4.18.0",
+            "--name",
+            "pkg",
+            "*.js",
+            "--",
+            helper(),
+            "--touch",
+            flag.to_str().unwrap(),
+        ],
     );
     assert_eq!(code2, 0);
     assert!(!flag.exists(), "same package version should skip command");
@@ -275,10 +333,23 @@ fn package_version_string_triggers_rerun() {
     let flag2 = dir.path().join("ran2.txt");
     let (_, _, code3) = run_stale(
         &dir,
-        &["-s", "express@4.19.0", "--name", "pkg", "*.js", "--", helper(), "--touch", flag2.to_str().unwrap()],
+        &[
+            "-s",
+            "express@4.19.0",
+            "--name",
+            "pkg",
+            "*.js",
+            "--",
+            helper(),
+            "--touch",
+            flag2.to_str().unwrap(),
+        ],
     );
     assert_eq!(code3, 0);
-    assert!(flag2.exists(), "bumped package version should trigger re-run");
+    assert!(
+        flag2.exists(),
+        "bumped package version should trigger re-run"
+    );
 }
 
 #[test]
@@ -291,7 +362,17 @@ fn multiple_package_versions_trigger_rerun() {
     // First run with two package versions.
     let (_, _, code1) = run_stale(
         &dir,
-        &["-s", "requests==2.31.0", "-s", "flask==3.0.0", "--name", "deps", "*.py", "--", helper()],
+        &[
+            "-s",
+            "requests==2.31.0",
+            "-s",
+            "flask==3.0.0",
+            "--name",
+            "deps",
+            "*.py",
+            "--",
+            helper(),
+        ],
     );
     assert_eq!(code1, 0);
 
@@ -299,7 +380,19 @@ fn multiple_package_versions_trigger_rerun() {
     let flag = dir.path().join("ran.txt");
     let (_, _, code2) = run_stale(
         &dir,
-        &["-s", "requests==2.31.0", "-s", "flask==3.0.0", "--name", "deps", "*.py", "--", helper(), "--touch", flag.to_str().unwrap()],
+        &[
+            "-s",
+            "requests==2.31.0",
+            "-s",
+            "flask==3.0.0",
+            "--name",
+            "deps",
+            "*.py",
+            "--",
+            helper(),
+            "--touch",
+            flag.to_str().unwrap(),
+        ],
     );
     assert_eq!(code2, 0);
     assert!(!flag.exists(), "same package versions should skip");
@@ -308,10 +401,25 @@ fn multiple_package_versions_trigger_rerun() {
     let flag2 = dir.path().join("ran2.txt");
     let (_, _, code3) = run_stale(
         &dir,
-        &["-s", "requests==2.32.0", "-s", "flask==3.0.0", "--name", "deps", "*.py", "--", helper(), "--touch", flag2.to_str().unwrap()],
+        &[
+            "-s",
+            "requests==2.32.0",
+            "-s",
+            "flask==3.0.0",
+            "--name",
+            "deps",
+            "*.py",
+            "--",
+            helper(),
+            "--touch",
+            flag2.to_str().unwrap(),
+        ],
     );
     assert_eq!(code3, 0);
-    assert!(flag2.exists(), "bumping one package version should trigger re-run");
+    assert!(
+        flag2.exists(),
+        "bumping one package version should trigger re-run"
+    );
 }
 
 #[test]
@@ -322,7 +430,15 @@ fn package_version_with_unchanged_source_still_reruns() {
 
     let (_, _, code1) = run_stale(
         &dir,
-        &["-s", "numpy==1.26.0", "--name", "ver", "*.py", "--", helper()],
+        &[
+            "-s",
+            "numpy==1.26.0",
+            "--name",
+            "ver",
+            "*.py",
+            "--",
+            helper(),
+        ],
     );
     assert_eq!(code1, 0);
 
@@ -330,10 +446,23 @@ fn package_version_with_unchanged_source_still_reruns() {
     let flag = dir.path().join("ran.txt");
     let (_, _, code2) = run_stale(
         &dir,
-        &["-s", "numpy==1.27.0", "--name", "ver", "*.py", "--", helper(), "--touch", flag.to_str().unwrap()],
+        &[
+            "-s",
+            "numpy==1.27.0",
+            "--name",
+            "ver",
+            "*.py",
+            "--",
+            helper(),
+            "--touch",
+            flag.to_str().unwrap(),
+        ],
     );
     assert_eq!(code2, 0);
-    assert!(flag.exists(), "version bump alone (unchanged source) should trigger re-run");
+    assert!(
+        flag.exists(),
+        "version bump alone (unchanged source) should trigger re-run"
+    );
 }
 
 // ── recursive glob patterns ─────────────────────────────────────────────────
@@ -374,7 +503,10 @@ fn recursive_glob_detects_nested_change() {
         &[&pattern, "--", helper(), "--touch", flag.to_str().unwrap()],
     );
     assert_eq!(code2, 0);
-    assert!(flag.exists(), "should detect change in nested file via recursive glob");
+    assert!(
+        flag.exists(),
+        "should detect change in nested file via recursive glob"
+    );
 }
 
 // ── string flag ──────────────────────────────────────────────────────────────
@@ -392,7 +524,15 @@ fn string_flag_changes_hash() {
     let flag = dir.path().join("ran.txt");
     let (_, _, code2) = run_stale(
         &dir,
-        &["-s", "v2", "*.txt", "--", helper(), "--touch", flag.to_str().unwrap()],
+        &[
+            "-s",
+            "v2",
+            "*.txt",
+            "--",
+            helper(),
+            "--touch",
+            flag.to_str().unwrap(),
+        ],
     );
     assert_eq!(code2, 0);
     assert!(flag.exists(), "different --string should trigger re-run");
@@ -404,14 +544,27 @@ fn same_string_skips_command() {
     fs::write(dir.path().join("file.txt"), b"hello").unwrap();
 
     // Save state with string v1.
-    let (_, _, code1) = run_stale(&dir, &["-s", "v1", "--name", "str-test", "*.txt", "--", helper()]);
+    let (_, _, code1) = run_stale(
+        &dir,
+        &["-s", "v1", "--name", "str-test", "*.txt", "--", helper()],
+    );
     assert_eq!(code1, 0);
 
     // Same string and same file should skip.
     let flag = dir.path().join("ran.txt");
     let (_, _, code2) = run_stale(
         &dir,
-        &["-s", "v1", "--name", "str-test", "*.txt", "--", helper(), "--touch", flag.to_str().unwrap()],
+        &[
+            "-s",
+            "v1",
+            "--name",
+            "str-test",
+            "*.txt",
+            "--",
+            helper(),
+            "--touch",
+            flag.to_str().unwrap(),
+        ],
     );
     assert_eq!(code2, 0);
     assert!(!flag.exists(), "same --string value should skip command");
@@ -422,10 +575,7 @@ fn multiple_strings_accepted() {
     let dir = tempfile::tempdir().unwrap();
     fs::write(dir.path().join("file.txt"), b"hello").unwrap();
 
-    let (_, _, code) = run_stale(
-        &dir,
-        &["-s", "str1", "-s", "str2", "*.txt", "--", helper()],
-    );
+    let (_, _, code) = run_stale(&dir, &["-s", "str1", "-s", "str2", "*.txt", "--", helper()]);
     assert_eq!(code, 0, "multiple --string values should be accepted");
 }
 
@@ -470,7 +620,10 @@ fn chain_run_exits_1_after_modification() {
 
     // Should exit 1 (changed).
     let (_, _, code2) = run_stale(&dir, &["*.txt"]);
-    assert_eq!(code2, 1, "should exit 1 after file modification (chain run)");
+    assert_eq!(
+        code2, 1,
+        "should exit 1 after file modification (chain run)"
+    );
 }
 
 // ── should-run check ────────────────────────────────────────────────────────
@@ -509,6 +662,247 @@ fn should_run_returns_1_after_failed_command() {
 
     // Check should return 1 (no saved state).
     let (_, _, code2) = run_stale(&dir, &["*.txt"]);
-    assert_eq!(code2, 1, "should return 1 after failed command (state not saved)");
+    assert_eq!(
+        code2, 1,
+        "should return 1 after failed command (state not saved)"
+    );
 }
 
+// ── --pkg flag (smart package version lookup) ───────────────────────────────
+
+#[test]
+fn pkg_npm_reads_express_version() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies":{"express":"^4.18.0"}}"#,
+    )
+    .unwrap();
+    fs::write(dir.path().join("index.js"), b"app()").unwrap();
+
+    let (_, _, code) = run_stale(
+        &dir,
+        &[
+            "-p",
+            "npm:express",
+            "--name",
+            "npm-pkg",
+            "*.js",
+            "--",
+            helper(),
+        ],
+    );
+    assert_eq!(code, 0, "--pkg npm:express should resolve and run");
+}
+
+#[test]
+fn pkg_npm_version_change_triggers_rerun() {
+    let dir = tempfile::tempdir().unwrap();
+    let pkg = dir.path().join("package.json");
+    fs::write(&pkg, r#"{"dependencies":{"express":"^4.18.0"}}"#).unwrap();
+    fs::write(dir.path().join("index.js"), b"app()").unwrap();
+
+    // First run saves state.
+    let (_, _, code1) = run_stale(
+        &dir,
+        &[
+            "-p",
+            "npm:express",
+            "--name",
+            "npm-ver",
+            "*.js",
+            "--",
+            helper(),
+        ],
+    );
+    assert_eq!(code1, 0);
+
+    // Same version → skip.
+    let flag = dir.path().join("ran.txt");
+    let (_, _, code2) = run_stale(
+        &dir,
+        &[
+            "-p",
+            "npm:express",
+            "--name",
+            "npm-ver",
+            "*.js",
+            "--",
+            helper(),
+            "--touch",
+            flag.to_str().unwrap(),
+        ],
+    );
+    assert_eq!(code2, 0);
+    assert!(!flag.exists(), "same npm version should skip");
+
+    // Bump express version in package.json.
+    fs::write(&pkg, r#"{"dependencies":{"express":"^4.19.0"}}"#).unwrap();
+
+    let flag2 = dir.path().join("ran2.txt");
+    let (_, _, code3) = run_stale(
+        &dir,
+        &[
+            "-p",
+            "npm:express",
+            "--name",
+            "npm-ver",
+            "*.js",
+            "--",
+            helper(),
+            "--touch",
+            flag2.to_str().unwrap(),
+        ],
+    );
+    assert_eq!(code3, 0);
+    assert!(flag2.exists(), "npm version bump should trigger re-run");
+}
+
+#[test]
+fn pkg_uv_reads_version() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(
+        dir.path().join("uv.lock"),
+        "version = 1\n\n[[package]]\nname = \"requests\"\nversion = \"2.31.0\"\n",
+    )
+    .unwrap();
+    fs::write(dir.path().join("app.py"), b"import requests").unwrap();
+
+    let (_, _, code) = run_stale(
+        &dir,
+        &[
+            "-p",
+            "uv:requests",
+            "--name",
+            "uv-pkg",
+            "*.py",
+            "--",
+            helper(),
+        ],
+    );
+    assert_eq!(code, 0, "--pkg uv:requests should resolve and run");
+}
+
+#[test]
+fn pkg_uv_version_change_triggers_rerun() {
+    let dir = tempfile::tempdir().unwrap();
+    let lock = dir.path().join("uv.lock");
+    fs::write(
+        &lock,
+        "version = 1\n\n[[package]]\nname = \"requests\"\nversion = \"2.31.0\"\n",
+    )
+    .unwrap();
+    fs::write(dir.path().join("app.py"), b"import requests").unwrap();
+
+    // First run saves state.
+    let (_, _, code1) = run_stale(
+        &dir,
+        &[
+            "-p",
+            "uv:requests",
+            "--name",
+            "uv-ver",
+            "*.py",
+            "--",
+            helper(),
+        ],
+    );
+    assert_eq!(code1, 0);
+
+    // Bump version in uv.lock.
+    fs::write(
+        &lock,
+        "version = 1\n\n[[package]]\nname = \"requests\"\nversion = \"2.32.0\"\n",
+    )
+    .unwrap();
+
+    let flag = dir.path().join("ran.txt");
+    let (_, _, code2) = run_stale(
+        &dir,
+        &[
+            "-p",
+            "uv:requests",
+            "--name",
+            "uv-ver",
+            "*.py",
+            "--",
+            helper(),
+            "--touch",
+            flag.to_str().unwrap(),
+        ],
+    );
+    assert_eq!(code2, 0);
+    assert!(flag.exists(), "uv version bump should trigger re-run");
+}
+
+#[test]
+fn pkg_multiple_packages() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies":{"express":"^4.18.0","react":"^18.2.0"}}"#,
+    )
+    .unwrap();
+    fs::write(dir.path().join("app.js"), b"code").unwrap();
+
+    let (_, _, code) = run_stale(
+        &dir,
+        &[
+            "-p",
+            "npm:express",
+            "-p",
+            "npm:react",
+            "--name",
+            "multi-pkg",
+            "*.js",
+            "--",
+            helper(),
+        ],
+    );
+    assert_eq!(code, 0, "multiple --pkg flags should be accepted");
+}
+
+#[test]
+fn pkg_missing_package_exits_with_error() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies":{"express":"^4.18.0"}}"#,
+    )
+    .unwrap();
+    fs::write(dir.path().join("app.js"), b"code").unwrap();
+
+    let (_, stderr, code) = run_stale(&dir, &["-p", "npm:nonexistent", "*.js"]);
+    assert_eq!(code, 2, "missing package should exit with error code 2");
+    assert!(
+        stderr.contains("not found"),
+        "should mention package not found: {stderr}"
+    );
+}
+
+#[test]
+fn pkg_combined_with_string_flag() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies":{"express":"^4.18.0"}}"#,
+    )
+    .unwrap();
+    fs::write(dir.path().join("app.js"), b"code").unwrap();
+
+    let (_, _, code) = run_stale(
+        &dir,
+        &[
+            "-p",
+            "npm:express",
+            "-s",
+            "NODE_ENV=production",
+            "--name",
+            "combo",
+            "*.js",
+            "--",
+            helper(),
+        ],
+    );
+    assert_eq!(code, 0, "--pkg and --string should work together");
+}

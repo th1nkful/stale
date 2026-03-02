@@ -4,6 +4,91 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+// ── package version resolution ──────────────────────────────────────────────
+
+/// Resolve a package version query in the form `"manager:package_name"`.
+///
+/// Supported managers:
+///
+/// | Prefix        | File parsed      | Example                    |
+/// |---------------|------------------|----------------------------|
+/// | `npm` / `js`  | `package.json`   | `npm:express`, `js:react`  |
+/// | `uv` / `py`   | `uv.lock`        | `uv:requests`, `py:flask`  |
+///
+/// Returns the resolved version string (e.g. `"^4.18.0"`).
+///
+/// Adding a new package manager only requires a new match arm and a small
+/// resolver function — the rest of the pipeline is unchanged.
+pub fn resolve_pkg_version(query: &str, base_dir: &Path) -> Result<String> {
+    let (manager, package) = query.split_once(':').ok_or_else(|| {
+        anyhow::anyhow!(
+            "Invalid package query '{query}': expected format 'manager:package' \
+             (e.g. 'npm:express', 'uv:requests')"
+        )
+    })?;
+
+    if package.is_empty() {
+        anyhow::bail!("Package name cannot be empty in query '{query}'");
+    }
+
+    match manager {
+        "npm" | "js" => resolve_npm_version(package, base_dir),
+        "uv" | "py" | "python" => resolve_uv_version(package, base_dir),
+        _ => Err(anyhow::anyhow!(
+            "Unknown package manager '{manager}'. Supported: npm (js), uv (py/python)"
+        )),
+    }
+}
+
+/// Look up `package` in `package.json` under `dependencies`,
+/// `devDependencies`, or `peerDependencies` (checked in that order).
+fn resolve_npm_version(package: &str, base_dir: &Path) -> Result<String> {
+    let pkg_path = base_dir.join("package.json");
+    let contents = fs::read_to_string(&pkg_path)
+        .with_context(|| format!("Failed to read {}", pkg_path.display()))?;
+
+    let json: serde_json::Value =
+        serde_json::from_str(&contents).context("Failed to parse package.json")?;
+
+    for section in &["dependencies", "devDependencies", "peerDependencies"] {
+        if let Some(version) = json.get(section).and_then(|s| s.get(package)) {
+            if let Some(v) = version.as_str() {
+                return Ok(v.to_string());
+            }
+        }
+    }
+
+    Err(anyhow::anyhow!(
+        "Package '{package}' not found in {}",
+        pkg_path.display()
+    ))
+}
+
+/// Look up `package` in `uv.lock` (`[[package]]` table array).
+fn resolve_uv_version(package: &str, base_dir: &Path) -> Result<String> {
+    let lock_path = base_dir.join("uv.lock");
+    let contents = fs::read_to_string(&lock_path)
+        .with_context(|| format!("Failed to read {}", lock_path.display()))?;
+
+    let doc: toml::Value = toml::from_str(&contents).context("Failed to parse uv.lock")?;
+
+    if let Some(packages) = doc.get("package").and_then(|p| p.as_array()) {
+        for entry in packages {
+            let name = entry.get("name").and_then(|n| n.as_str()).unwrap_or("");
+            if name == package {
+                if let Some(version) = entry.get("version").and_then(|v| v.as_str()) {
+                    return Ok(version.to_string());
+                }
+            }
+        }
+    }
+
+    Err(anyhow::anyhow!(
+        "Package '{package}' not found in {}",
+        lock_path.display()
+    ))
+}
+
 /// Expand one or more glob patterns into a sorted, deduplicated list of file paths.
 pub fn expand_globs(patterns: &[String]) -> Result<Vec<PathBuf>> {
     let mut paths: Vec<PathBuf> = Vec::new();
@@ -392,5 +477,114 @@ mod tests {
         assert_ne!(h1, h2, "different strings-only hashes should differ");
         assert_eq!(h1.len(), 64);
     }
-}
 
+    // ── package version resolution ──────────────────────────────────────────
+
+    #[test]
+    fn test_resolve_npm_version_from_dependencies() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("package.json"),
+            r#"{"dependencies":{"express":"^4.18.0"}}"#,
+        )
+        .unwrap();
+        let v = resolve_pkg_version("npm:express", dir.path()).unwrap();
+        assert_eq!(v, "^4.18.0");
+    }
+
+    #[test]
+    fn test_resolve_npm_version_from_dev_dependencies() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("package.json"),
+            r#"{"devDependencies":{"jest":"^29.0.0"}}"#,
+        )
+        .unwrap();
+        let v = resolve_pkg_version("js:jest", dir.path()).unwrap();
+        assert_eq!(v, "^29.0.0");
+    }
+
+    #[test]
+    fn test_resolve_npm_version_not_found() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("package.json"),
+            r#"{"dependencies":{"express":"^4.18.0"}}"#,
+        )
+        .unwrap();
+        let err = resolve_pkg_version("npm:missing", dir.path());
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn test_resolve_uv_version() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("uv.lock"),
+            r#"
+version = 1
+
+[[package]]
+name = "flask"
+version = "3.0.0"
+
+[[package]]
+name = "requests"
+version = "2.31.0"
+"#,
+        )
+        .unwrap();
+        let v = resolve_pkg_version("uv:requests", dir.path()).unwrap();
+        assert_eq!(v, "2.31.0");
+    }
+
+    #[test]
+    fn test_resolve_uv_version_py_alias() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("uv.lock"),
+            r#"
+version = 1
+
+[[package]]
+name = "flask"
+version = "3.0.0"
+"#,
+        )
+        .unwrap();
+        let v = resolve_pkg_version("py:flask", dir.path()).unwrap();
+        assert_eq!(v, "3.0.0");
+    }
+
+    #[test]
+    fn test_resolve_uv_version_not_found() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("uv.lock"),
+            r#"
+version = 1
+
+[[package]]
+name = "flask"
+version = "3.0.0"
+"#,
+        )
+        .unwrap();
+        let err = resolve_pkg_version("uv:missing", dir.path());
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn test_resolve_unknown_manager() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = resolve_pkg_version("cargo:serde", dir.path());
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn test_resolve_invalid_format() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = resolve_pkg_version("no-colon", dir.path());
+        assert!(err.is_err());
+    }
+}

@@ -1,7 +1,8 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Parser;
 use stale::{
-    compute_hash, compute_hash_verbose, derive_name, expand_globs, load_sum_entry, save_sum_entry,
+    compute_hash, compute_hash_verbose, derive_name, expand_globs, load_sum_entry,
+    resolve_pkg_version, save_sum_entry,
 };
 use std::path::PathBuf;
 use std::process;
@@ -20,6 +21,9 @@ use std::process;
 ///   stale --name lint 'src/**/*.rs' -- cargo clippy
 ///   stale --name test 'tests/**' -- cargo test
 ///
+///   # Re-run tests when a specific package version changes
+///   stale -p npm:express 'src/**' -- npm test
+///
 ///   # Exit 0 if files are unchanged, 1 if changed (no command needed)
 ///   stale 'src/**/*.rs' && echo "nothing changed"
 #[derive(Parser, Debug)]
@@ -35,12 +39,7 @@ struct Cli {
     globs: Vec<String>,
 
     /// Path to the .sum file used to store hash state.
-    #[arg(
-        short = 'f',
-        long,
-        default_value = ".stale.sum",
-        value_name = "PATH"
-    )]
+    #[arg(short = 'f', long, default_value = ".stale.sum", value_name = "PATH")]
     sum_file: PathBuf,
 
     /// Name for this entry in the .sum file.
@@ -57,6 +56,13 @@ struct Cli {
     #[arg(short, long = "string", value_name = "STRING")]
     strings: Vec<String>,
 
+    /// Look up a package version and include it in the hash.
+    ///
+    /// Format: `manager:package` (e.g., `npm:express`, `uv:requests`).
+    /// Supported managers: npm (or js), uv (or py/python).
+    #[arg(short = 'p', long = "pkg", value_name = "QUERY")]
+    packages: Vec<String>,
+
     /// Always run the command even if the files have not changed.
     #[arg(long)]
     force: bool,
@@ -71,28 +77,39 @@ struct Cli {
 }
 
 fn run(cli: Cli) -> Result<i32> {
+    // Resolve package version queries into concrete version strings.
+    let cwd = std::env::current_dir().context("Failed to determine current directory")?;
+    let mut all_strings = cli.strings.clone();
+    for query in &cli.packages {
+        let version = resolve_pkg_version(query, &cwd)?;
+        if cli.verbose {
+            eprintln!("stale: {query} → {version}");
+        }
+        all_strings.push(format!("{query}={version}"));
+    }
+
     // Resolve the entry name: explicit flag > derived from glob patterns + strings.
     let name = cli
         .name
         .clone()
-        .unwrap_or_else(|| derive_name(&cli.globs, &cli.strings));
+        .unwrap_or_else(|| derive_name(&cli.globs, &all_strings));
 
     // Expand globs to a sorted, deduplicated file list.
     let files = expand_globs(&cli.globs)?;
 
-    if files.is_empty() && cli.strings.is_empty() {
+    if files.is_empty() && all_strings.is_empty() {
         eprintln!("stale: warning: no files matched the provided patterns");
     }
 
     // Compute hash (with optional per-file breakdown for verbose mode).
     let current_hash = if cli.verbose {
-        let (combined, per_file) = compute_hash_verbose(&files, &cli.strings)?;
+        let (combined, per_file) = compute_hash_verbose(&files, &all_strings)?;
         for (path, hash) in &per_file {
             eprintln!("  {hash}  {path}");
         }
         combined
     } else {
-        compute_hash(&files, &cli.strings)?
+        compute_hash(&files, &all_strings)?
     };
 
     if cli.verbose {
@@ -163,4 +180,3 @@ fn main() {
         }
     }
 }
-
