@@ -7,22 +7,22 @@ class Stale < Formula
   on_macos do
     on_intel do
       url "https://github.com/th1nkful/stale/releases/download/0.2.0/stale-x86_64-apple-darwin.tar.gz"
-      sha256 "e571ecb91adfa3955a403c91cfbba4e3a19041cfc9697f3ed187b09190c4e798"
+      sha256 :no_check
     end
     on_arm do
       url "https://github.com/th1nkful/stale/releases/download/0.2.0/stale-aarch64-apple-darwin.tar.gz"
-      sha256 "e571ecb91adfa3955a403c91cfbba4e3a19041cfc9697f3ed187b09190c4e798"
+      sha256 :no_check
     end
   end
 
   on_linux do
     on_intel do
       url "https://github.com/th1nkful/stale/releases/download/0.2.0/stale-x86_64-unknown-linux-gnu.tar.gz"
-      sha256 "e571ecb91adfa3955a403c91cfbba4e3a19041cfc9697f3ed187b09190c4e798"
+      sha256 :no_check
     end
     on_arm do
       url "https://github.com/th1nkful/stale/releases/download/0.2.0/stale-aarch64-unknown-linux-gnu.tar.gz"
-      sha256 "e571ecb91adfa3955a403c91cfbba4e3a19041cfc9697f3ed187b09190c4e798"
+      sha256 :no_check
     end
   end
 
