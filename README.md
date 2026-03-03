@@ -13,6 +13,18 @@ When no command is supplied `stale` exits `0` if files are unchanged and `1` if 
 
 ## Installation
 
+### Shell installer (Ubuntu / Linux / macOS)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/th1nkful/stale/main/install.sh | sh
+```
+
+Install a specific version or to a custom directory:
+
+```bash
+STALE_VERSION=0.2.0 INSTALL_DIR=~/.local/bin curl -fsSL https://raw.githubusercontent.com/th1nkful/stale/main/install.sh | sh
+```
+
 ### Homebrew (macOS/Linux)
 
 ```bash
