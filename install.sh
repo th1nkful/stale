@@ -88,11 +88,11 @@ main() {
 
   if [ -w "$INSTALL_DIR" ]; then
     mv "${tmpdir}/stale" "${INSTALL_DIR}/stale"
+    chmod +x "${INSTALL_DIR}/stale"
   else
     sudo mv "${tmpdir}/stale" "${INSTALL_DIR}/stale"
+    sudo chmod +x "${INSTALL_DIR}/stale"
   fi
-
-  chmod +x "${INSTALL_DIR}/stale"
 
   echo "stale ${version} installed to ${INSTALL_DIR}/stale"
 }
