@@ -45,36 +45,21 @@ resolve_version() {
     return
   fi
 
-  # Prefer authenticated GitHub API if a token is provided; otherwise use the
-  # /releases/latest redirect (not subject to the same API rate limits).
-  token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+  # Use the /releases/latest redirect to discover the latest tag.
+  # This is not subject to the same API rate limits as the REST API.
+  latest_url="https://github.com/${REPO}/releases/latest"
 
-  if [ -n "$token" ]; then
-    api_url="https://api.github.com/repos/${REPO}/releases/latest"
-    auth_header="Authorization: Bearer $token"
-    accept_header="Accept: application/vnd.github+json"
-
-    if command -v curl >/dev/null 2>&1; then
-      tag=$(curl -fsSL -H "$auth_header" -H "$accept_header" "$api_url" | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p')
-    elif command -v wget >/dev/null 2>&1; then
-      tag=$(wget -qO- --header="$auth_header" --header="$accept_header" "$api_url" | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p')
-    else
-      echo "Error: curl or wget is required" >&2
-      exit 1
-    fi
+  if command -v curl >/dev/null 2>&1; then
+    # Follow redirects and capture the final URL, which ends with /tag/<tag>
+    final_url=$(curl -fsSL -o /dev/null -w '%{url_effective}' "$latest_url")
+    tag=$(printf '%s\n' "$final_url" | sed 's#.*/tag/##')
+  elif command -v wget >/dev/null 2>&1; then
+    # Inspect the Location header to find the target URL.
+    final_url=$(wget -qO- --max-redirect=0 --server-response "$latest_url" 2>&1 | awk '/^  Location: / {print $2}' | tail -n 1)
+    tag=$(printf '%s\n' "$final_url" | sed 's#.*/tag/##')
   else
-    latest_url="https://github.com/${REPO}/releases/latest"
-
-    if command -v curl >/dev/null 2>&1; then
-      final_url=$(curl -fsSL -o /dev/null -w '%{url_effective}' "$latest_url")
-      tag=$(printf '%s\n' "$final_url" | sed 's#.*/tag/##')
-    elif command -v wget >/dev/null 2>&1; then
-      final_url=$(wget -qO- --max-redirect=0 --server-response "$latest_url" 2>&1 | awk '/^  Location: / {print $2}' | tail -n 1)
-      tag=$(printf '%s\n' "$final_url" | sed 's#.*/tag/##')
-    else
-      echo "Error: curl or wget is required" >&2
-      exit 1
-    fi
+    echo "Error: curl or wget is required" >&2
+    exit 1
   fi
 
   if [ -z "${tag:-}" ]; then
