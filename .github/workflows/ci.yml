@@ -22,3 +22,27 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy -- -D warnings
       - run: cargo test
+
+  test-install:
+    runs-on: ubuntu-latest
+    name: Test install.sh on Ubuntu
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install via install.sh (default INSTALL_DIR)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: sh install.sh
+
+      - name: Verify stale is installed
+        run: /usr/local/bin/stale --version
+
+      - name: Install via install.sh (custom INSTALL_DIR)
+        env:
+          INSTALL_DIR: ${{ runner.temp }}/stale-bin
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: sh install.sh
+
+      - name: Verify stale in custom dir
+        run: |
+          "${{ runner.temp }}/stale-bin/stale" --version
