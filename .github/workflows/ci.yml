@@ -33,7 +33,7 @@ jobs:
         run: sh install.sh
 
       - name: Verify stale is installed
-        run: /usr/local/bin/stale --version
+        run: $HOME/.local/bin/stale --version
 
       - name: Install via install.sh (custom INSTALL_DIR)
         env:
