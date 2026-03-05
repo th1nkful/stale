@@ -6,12 +6,12 @@
 #
 # Environment variables:
 #   STALE_VERSION   — version to install (default: latest)
-#   INSTALL_DIR     — directory to install to (default: /usr/local/bin)
+#   INSTALL_DIR     — directory to install to (default: ~/.local/bin)
 
 set -eu
 
 REPO="th1nkful/stale"
-INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
+INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 
 # Detect architecture
 detect_target() {
@@ -129,6 +129,18 @@ main() {
   fi
 
   echo "stale ${version} installed to ${INSTALL_DIR}/stale"
+
+  # Hint: if INSTALL_DIR is not on the user's PATH, suggest adding it.
+  case ":${PATH}:" in
+    *":${INSTALL_DIR}:"*) ;;
+    *)
+      echo ""
+      echo "Note: ${INSTALL_DIR} is not in your PATH."
+      echo "Add it by appending the following line to your shell profile (~/.bashrc, ~/.zshrc, etc.):"
+      echo ""
+      echo "  export PATH=\"${INSTALL_DIR}:\$PATH\""
+      ;;
+  esac
 }
 
 main
