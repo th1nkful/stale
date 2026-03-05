@@ -22,8 +22,8 @@ curl -fsSL https://raw.githubusercontent.com/th1nkful/stale/main/install.sh | sh
 Install a specific version or to a custom directory:
 
 ```bash
-STALE_VERSION=0.2.0 curl -fsSL https://raw.githubusercontent.com/th1nkful/stale/main/install.sh | sh
-INSTALL_DIR=/usr/local/bin curl -fsSL https://raw.githubusercontent.com/th1nkful/stale/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/th1nkful/stale/main/install.sh | STALE_VERSION=0.2.0 sh
+curl -fsSL https://raw.githubusercontent.com/th1nkful/stale/main/install.sh | INSTALL_DIR=/usr/local/bin sh
 ```
 
 ### Homebrew (macOS/Linux)

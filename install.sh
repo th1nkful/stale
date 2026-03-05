@@ -11,7 +11,7 @@
 set -eu
 
 REPO="th1nkful/stale"
-INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
+INSTALL_DIR="${INSTALL_DIR:-${HOME:-$PWD}/.local/bin}"
 
 # Detect architecture
 detect_target() {
@@ -101,8 +101,8 @@ main() {
 
   # Ensure INSTALL_DIR exists
   if [ ! -d "$INSTALL_DIR" ]; then
-    if [ -w "$(dirname "$INSTALL_DIR")" ]; then
-      mkdir -p "$INSTALL_DIR"
+    if mkdir -p "$INSTALL_DIR" 2>/dev/null; then
+      : # created successfully without sudo
     elif command -v sudo >/dev/null 2>&1; then
       sudo mkdir -p "$INSTALL_DIR"
     else
