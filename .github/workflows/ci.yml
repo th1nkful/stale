@@ -23,6 +23,42 @@ jobs:
       - run: cargo clippy -- -D warnings
       - run: cargo test
 
+  validate-docs:
+    runs-on: ubuntu-latest
+    name: Validate installation docs are up to date
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check formula version matches docs examples
+        run: |
+          formula_version=$(grep -m1 '^  version ' Formula/stale.rb | sed 's/.*version "\(.*\)"/\1/')
+          echo "Formula version: $formula_version"
+
+          # Check README.md
+          if ! grep -qF "STALE_VERSION=${formula_version}" README.md; then
+            echo "ERROR: README.md does not reference STALE_VERSION=${formula_version}"
+            echo "Please update the STALE_VERSION example in README.md to ${formula_version}"
+            exit 1
+          fi
+
+          # Check docs/installation.md
+          if ! grep -qF "STALE_VERSION=${formula_version}" docs/installation.md; then
+            echo "ERROR: docs/installation.md does not reference STALE_VERSION=${formula_version}"
+            echo "Please update the STALE_VERSION example in docs/installation.md to ${formula_version}"
+            exit 1
+          fi
+
+          echo "OK: all documentation version examples match formula version ${formula_version}"
+
+      - name: Check hash algorithm references are consistent
+        run: |
+          # docs/index.md must not mention SHA-256 (the actual algorithm is xxHash3)
+          if grep -qi "sha-256\|sha256" docs/index.md; then
+            echo "ERROR: docs/index.md references SHA-256 but the implementation uses xxHash3"
+            exit 1
+          fi
+          echo "OK: hash algorithm references are consistent"
+
   test-install:
     runs-on: ubuntu-latest
     name: Test install.sh on Ubuntu
