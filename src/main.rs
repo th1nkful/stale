@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
 use clap::Parser;
 use stale::{
-    compute_hash, compute_hash_verbose, derive_name, expand_globs, find_git_root, load_sum_entry,
-    resolve_pkg_version, save_sum_entry,
+    compute_hash, compute_hash_verbose, derive_name, expand_globs, find_duplicate_entries,
+    find_git_root, load_sum_entry, resolve_pkg_version, save_sum_entry,
 };
 use std::path::{Path, PathBuf};
 use std::process;
@@ -137,6 +137,27 @@ fn run(cli: Cli) -> Result<i32> {
         .name
         .clone()
         .unwrap_or_else(|| derive_name(&cli.globs, &all_strings, name_prefix.as_deref()));
+
+    // Warn about duplicate entries in the sum file.  Duplicates arise when a
+    // merge conflict leaves both sides of the conflict as real entries.
+    let duplicates = find_duplicate_entries(&sum_file)?;
+    for dup in &duplicates {
+        if dup == &name {
+            eprintln!(
+                "stale: warning: duplicate entries for '{}' in {}; \
+                 re-run this command to store the correct hash",
+                dup,
+                sum_file.display()
+            );
+        } else {
+            eprintln!(
+                "stale: warning: duplicate entries for '{}' in {}; \
+                 run the associated stale command again or edit the file manually",
+                dup,
+                sum_file.display()
+            );
+        }
+    }
 
     // Expand globs to a sorted, deduplicated file list.
     let files = expand_globs(&cli.globs)?;

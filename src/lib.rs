@@ -333,6 +333,40 @@ pub fn save_sum_entry(path: &Path, name: &str, hash: &str, skip_cleanup: bool) -
 
     Ok(())
 }
+/// Scan the sum file for entry names that appear more than once.
+///
+/// Duplicate names can arise when a merge conflict leaves two versions of the
+/// same entry in the file (one from each side of the conflict).  Conflict
+/// marker lines are always skipped, so only genuine `<name> <hash>` entries
+/// are considered.
+///
+/// Returns the list of names that have more than one entry; the list is empty
+/// when the file is clean.
+pub fn find_duplicate_entries(path: &Path) -> Result<Vec<String>> {
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+
+    let contents = fs::read_to_string(path)
+        .with_context(|| format!("Failed to read sum file {}", path.display()))?;
+
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    for line in contents.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || is_conflict_marker_line(trimmed) {
+            continue;
+        }
+        if let Some((name, _)) = trimmed.split_once(char::is_whitespace) {
+            *counts.entry(name.to_string()).or_insert(0) += 1;
+        }
+    }
+
+    Ok(counts
+        .into_iter()
+        .filter(|(_, count)| *count > 1)
+        .map(|(name, _)| name)
+        .collect())
+}
 
 #[cfg(test)]
 mod tests {
@@ -834,5 +868,53 @@ version = "3.0.0"
         save_sum_entry(&sum_path, "key", "val", false).unwrap();
         let loaded = load_sum_entry(&sum_path, "key").unwrap();
         assert_eq!(loaded, Some("val".to_string()));
+    }
+
+    // ── duplicate entry detection ────────────────────────────────────────────
+
+    #[test]
+    fn test_find_duplicate_entries_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let sum_path = dir.path().join("state.sum");
+        save_sum_entry(&sum_path, "alpha", "hash-a", false).unwrap();
+        save_sum_entry(&sum_path, "beta", "hash-b", false).unwrap();
+        let dups = find_duplicate_entries(&sum_path).unwrap();
+        assert!(dups.is_empty(), "clean file should have no duplicates");
+    }
+
+    #[test]
+    fn test_find_duplicate_entries_detects_duplicates() {
+        let dir = tempfile::tempdir().unwrap();
+        let sum_path = dir.path().join("state.sum");
+        // Manually write a file where "alpha" appears twice (simulating a
+        // merge conflict where both sides had an alpha entry).
+        fs::write(&sum_path, "alpha hash1\nalpha hash2\nbeta hash-b\n").unwrap();
+        let mut dups = find_duplicate_entries(&sum_path).unwrap();
+        dups.sort();
+        assert_eq!(dups, vec!["alpha"]);
+    }
+
+    #[test]
+    fn test_find_duplicate_entries_from_conflict_markers() {
+        let dir = tempfile::tempdir().unwrap();
+        let sum_path = dir.path().join("state.sum");
+        // Simulate a conflict where both sides of a merge had entries for the
+        // same key; the conflict markers surround the two versions.
+        fs::write(
+            &sum_path,
+            "<<<<<<< HEAD\nalpha hash-a1\nbeta hash-b1\n=======\nalpha hash-a2\nbeta hash-b2\n>>>>>>> feature\n",
+        )
+        .unwrap();
+        let mut dups = find_duplicate_entries(&sum_path).unwrap();
+        dups.sort();
+        assert_eq!(dups, vec!["alpha", "beta"]);
+    }
+
+    #[test]
+    fn test_find_duplicate_entries_missing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("no-state.sum");
+        let dups = find_duplicate_entries(&missing).unwrap();
+        assert!(dups.is_empty(), "missing file should return empty list");
     }
 }
