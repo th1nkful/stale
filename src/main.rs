@@ -75,6 +75,15 @@ struct Cli {
     #[arg(long)]
     force: bool,
 
+    /// Skip the automatic removal of git conflict markers from the sum file.
+    ///
+    /// By default, when stale writes the sum file it removes any git conflict
+    /// marker lines (`<<<<<<<`, `=======`, `>>>>>>>`) that may have been left
+    /// by a failed merge.  Pass this flag to disable that cleanup and leave
+    /// the file as-is.
+    #[arg(long)]
+    skip_cleanup: bool,
+
     /// Print matched files and their individual hashes.
     #[arg(short, long)]
     verbose: bool,
@@ -193,7 +202,7 @@ fn run(cli: Cli) -> Result<i32> {
 
     // Only persist the new hash when the command succeeded.
     if status.success() {
-        save_sum_entry(&sum_file, &name, &current_hash)?;
+        save_sum_entry(&sum_file, &name, &current_hash, cli.skip_cleanup)?;
         if cli.verbose {
             eprintln!("stale: state saved to {}", sum_file.display());
         }

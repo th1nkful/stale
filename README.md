@@ -61,6 +61,7 @@ stale [OPTIONS] <GLOB>... [-- <COMMAND>...]
 | `-s, --string <STRING>` | Extra string(s) to include in the hash (e.g. version numbers, environment variables) |
 | `-p, --pkg <QUERY>` | Look up a package version and include it in the hash (format: `manager:package`, e.g. `npm:express`, `uv:requests`) |
 | `--force` | Always run the command, even if files are unchanged |
+| `--skip-cleanup` | Skip the automatic removal of git conflict markers from the sum file |
 | `-v, --verbose` | Print per-file hashes and status messages |
 | `-h, --help` | Print help |
 | `-V, --version` | Print version |
@@ -97,6 +98,8 @@ test          7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8
 - When no `--name` is given, the name is derived from a short hash of the glob patterns and the working directory relative to the git root — the same invocation from the same directory always reuses the same entry, while different subdirectories get distinct entries to avoid collisions.
 - Multiple invocations in the same directory (e.g. for lint and test) each get their own named entry in the shared `.stale.sum` file.
 - You can add `.stale.sum` to `.gitignore` or commit it to share the baseline state with your team.
+
+If `.stale.sum` is committed and a merge conflict occurs, git may leave conflict markers in the file.  When stale next updates the file it automatically strips those markers so the sum file returns to a clean state.  Pass `--skip-cleanup` to disable this behaviour.
 
 ## Examples
 

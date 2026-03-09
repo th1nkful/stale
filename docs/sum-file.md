@@ -24,3 +24,13 @@ test          7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8
 ## Version control
 
 You can add `.stale.sum` to `.gitignore` or commit it to share the baseline state with your team.
+
+## Conflict markers
+
+If `.stale.sum` is committed to version control and a merge conflict occurs, git may leave conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`) inside the file.  When stale next updates the file it automatically removes those markers so the sum file returns to a clean state.
+
+To disable this automatic cleanup — for example when you want to resolve the conflict manually — pass `--skip-cleanup`:
+
+```bash
+stale --skip-cleanup 'src/**/*.rs' -- cargo test
+```
