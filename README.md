@@ -99,7 +99,7 @@ test          7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8
 - Multiple invocations in the same directory (e.g. for lint and test) each get their own named entry in the shared `.stale.sum` file.
 - You can add `.stale.sum` to `.gitignore` or commit it to share the baseline state with your team.
 
-If `.stale.sum` is committed and a merge conflict occurs, git may leave conflict markers in the file.  When stale next updates the file it automatically strips those markers so the sum file returns to a clean state.  Pass `--skip-cleanup` to disable this behaviour.
+If `.stale.sum` is committed and a merge conflict occurs, git may leave conflict markers in the file.  When stale next updates the file it automatically strips those markers so the sum file returns to a clean state.  Pass `--skip-cleanup` to disable this conflict-marker stripping; the file is still rewritten and sorted, and any remaining conflict-marker lines are appended at the end of the file.
 
 ## Examples
 

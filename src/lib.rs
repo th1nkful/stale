@@ -287,48 +287,52 @@ pub fn load_sum_entry(path: &Path, name: &str) -> Result<Option<String>> {
 /// The file is always rewritten with all entries sorted by name so the output
 /// is stable and deterministic regardless of insertion order.
 ///
-/// Unless `skip_cleanup` is `true`, any git conflict marker lines
-/// (`<<<<<<<`, `=======`, `>>>>>>>`) found in the existing file are removed
-/// as part of the rewrite.
+/// Conflict marker lines (`<<<<<<<`, `=======`, `>>>>>>>`) are **never**
+/// parsed as name/hash entries.  When `skip_cleanup` is `false` (the default)
+/// they are silently dropped from the rewritten file.  When `skip_cleanup` is
+/// `true` they are collected and appended verbatim at the end of the rewritten
+/// file, preserving them for manual resolution.
 pub fn save_sum_entry(path: &Path, name: &str, hash: &str, skip_cleanup: bool) -> Result<()> {
-    // Collect existing entries, skipping comments and blank lines.
-    let mut entries: Vec<(String, String)> = if path.exists() {
+    // Collect existing entries and (optionally) raw conflict-marker lines,
+    // skipping comments and blank lines.
+    let mut entries: Vec<(String, String)> = Vec::new();
+    let mut conflict_lines: Vec<String> = Vec::new();
+
+    if path.exists() {
         let contents = fs::read_to_string(path)
             .with_context(|| format!("Failed to read sum file {}", path.display()))?;
-        contents
-            .lines()
-            .filter_map(|line| {
-                let trimmed = line.trim();
-                if trimmed.is_empty() || trimmed.starts_with('#') {
-                    return None;
+        for line in contents.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+            if is_conflict_marker_line(trimmed) {
+                // Conflict markers are never parsed as name/hash entries.
+                // When skip_cleanup is true, preserve them verbatim so the
+                // user can resolve the conflict manually afterward.
+                if skip_cleanup {
+                    conflict_lines.push(trimmed.to_string());
                 }
-                // Remove conflict markers unless the caller asked to skip cleanup.
-                if !skip_cleanup && is_conflict_marker_line(trimmed) {
-                    return None;
+                continue;
+            }
+            let mut parts = trimmed.split_whitespace();
+            if let (Some(n), Some(h)) = (parts.next(), parts.next()) {
+                if n != name {
+                    // Exclude the entry we are about to upsert (handles
+                    // duplicate entries by keeping only the last write).
+                    entries.push((n.to_string(), h.to_string()));
                 }
-                let mut parts = trimmed.split_whitespace();
-                match (parts.next(), parts.next()) {
-                    (Some(n), Some(h)) => Some((n.to_string(), h.to_string())),
-                    _ => None,
-                }
-            })
-            .filter(|(n, _)| n != name) // remove the entry we're about to upsert
-            .collect()
-    } else {
-        Vec::new()
-    };
+            }
+        }
+    }
 
     entries.push((name.to_string(), hash.to_string()));
     entries.sort_by(|a, b| a.0.cmp(&b.0));
 
-    let contents: String = entries
-        .iter()
-        .map(|(n, h)| format!("{n} {h}"))
-        .collect::<Vec<_>>()
-        .join("\n")
-        + "\n";
+    let mut output_lines: Vec<String> = entries.iter().map(|(n, h)| format!("{n} {h}")).collect();
+    output_lines.extend(conflict_lines);
 
-    fs::write(path, contents)
+    fs::write(path, output_lines.join("\n") + "\n")
         .with_context(|| format!("Failed to write sum file {}", path.display()))?;
 
     Ok(())
@@ -837,8 +841,24 @@ version = "3.0.0"
             "conflict markers should be kept with skip_cleanup"
         );
         assert!(
+            contents.contains("======="),
+            "=======  separator should be kept with skip_cleanup"
+        );
+        assert!(
             contents.contains(">>>>>>>"),
             "conflict markers should be kept with skip_cleanup"
+        );
+        // Confirm conflict markers are NOT treated as name/hash entries: loading
+        // "<<<<<<<" as a name must return None.
+        let bogus = load_sum_entry(&sum_path, "<<<<<<<").unwrap();
+        assert_eq!(
+            bogus, None,
+            "conflict marker line must not be parsed as a name/hash entry"
+        );
+        // The new entry must be present.
+        assert!(
+            contents.contains("gamma hash-g"),
+            "new entry should be present"
         );
     }
 

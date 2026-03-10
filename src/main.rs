@@ -79,8 +79,10 @@ struct Cli {
     ///
     /// By default, when stale writes the sum file it removes any git conflict
     /// marker lines (`<<<<<<<`, `=======`, `>>>>>>>`) that may have been left
-    /// by a failed merge.  Pass this flag to disable that cleanup and leave
-    /// the file as-is.
+    /// by a failed merge.  Pass this flag to disable that specific cleanup and
+    /// preserve any existing conflict-marker lines (appended at the end of the
+    /// rewritten file).  The file is still rewritten and entries are still
+    /// sorted; only the conflict-marker stripping is skipped.
     #[arg(long)]
     skip_cleanup: bool,
 
@@ -145,7 +147,8 @@ fn run(cli: Cli) -> Result<i32> {
         if dup == &name {
             eprintln!(
                 "stale: warning: duplicate entries for '{}' in {}; \
-                 re-run this command to store the correct hash",
+                 re-run with --force to store the correct hash, \
+                 or edit the file manually",
                 dup,
                 sum_file.display()
             );
