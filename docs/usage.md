@@ -26,6 +26,7 @@ stale [OPTIONS] <GLOB>... [-- <COMMAND>...]
 | `-s, --string <STRING>` | Extra string(s) to include in the hash (e.g. version numbers, environment variables) |
 | `-p, --pkg <QUERY>` | Look up a package version and include it in the hash (format: `manager:package`, e.g. `npm:express`, `uv:requests`) |
 | `--force` | Always run the command, even if files are unchanged |
+| `--skip-cleanup` | Skip the automatic removal of git conflict markers from the sum file |
 | `-v, --verbose` | Print per-file hashes and status messages |
 | `-h, --help` | Print help |
 | `-V, --version` | Print version |

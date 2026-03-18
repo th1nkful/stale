@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
 use clap::Parser;
 use stale::{
-    compute_hash, compute_hash_verbose, derive_name, expand_globs, find_git_root, load_sum_entry,
-    resolve_pkg_version, save_sum_entry,
+    compute_hash, compute_hash_verbose, derive_name, expand_globs, find_duplicate_entries,
+    find_git_root, load_sum_entry, resolve_pkg_version, save_sum_entry,
 };
 use std::path::{Path, PathBuf};
 use std::process;
@@ -75,6 +75,17 @@ struct Cli {
     #[arg(long)]
     force: bool,
 
+    /// Skip the automatic removal of git conflict markers from the sum file.
+    ///
+    /// By default, when stale writes the sum file it removes any git conflict
+    /// marker lines (`<<<<<<<`, `=======`, `>>>>>>>`) that may have been left
+    /// by a failed merge.  Pass this flag to disable that specific cleanup and
+    /// preserve any existing conflict-marker lines (appended at the end of the
+    /// rewritten file).  The file is still rewritten and entries are still
+    /// sorted; only the conflict-marker stripping is skipped.
+    #[arg(long)]
+    skip_cleanup: bool,
+
     /// Print matched files and their individual hashes.
     #[arg(short, long)]
     verbose: bool,
@@ -128,6 +139,28 @@ fn run(cli: Cli) -> Result<i32> {
         .name
         .clone()
         .unwrap_or_else(|| derive_name(&cli.globs, &all_strings, name_prefix.as_deref()));
+
+    // Warn about duplicate entries in the sum file.  Duplicates arise when a
+    // merge conflict leaves both sides of the conflict as real entries.
+    let duplicates = find_duplicate_entries(&sum_file)?;
+    for dup in &duplicates {
+        if dup == &name {
+            eprintln!(
+                "stale: warning: duplicate entries for '{}' in {}; \
+                 re-run with --force to store the correct hash, \
+                 or edit the file manually",
+                dup,
+                sum_file.display()
+            );
+        } else {
+            eprintln!(
+                "stale: warning: duplicate entries for '{}' in {}; \
+                 run the associated stale command again or edit the file manually",
+                dup,
+                sum_file.display()
+            );
+        }
+    }
 
     // Expand globs to a sorted, deduplicated file list.
     let files = expand_globs(&cli.globs)?;
@@ -193,7 +226,7 @@ fn run(cli: Cli) -> Result<i32> {
 
     // Only persist the new hash when the command succeeded.
     if status.success() {
-        save_sum_entry(&sum_file, &name, &current_hash)?;
+        save_sum_entry(&sum_file, &name, &current_hash, cli.skip_cleanup)?;
         if cli.verbose {
             eprintln!("stale: state saved to {}", sum_file.display());
         }

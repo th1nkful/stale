@@ -247,11 +247,17 @@ pub fn find_git_root(start: &Path, ceiling: Option<&Path>) -> Option<PathBuf> {
     }
 }
 
+/// Return `true` if `line` is a git conflict marker (`<<<<<<<`, `=======`,
+/// or `>>>>>>>`).
+fn is_conflict_marker_line(line: &str) -> bool {
+    line.starts_with("<<<<<<<") || line == "=======" || line.starts_with(">>>>>>>")
+}
+
 /// Look up the hash stored for `name` in the `.sum` file at `path`.
 ///
 /// The file format is one `<name> <hash>` pair per line; lines starting with
-/// `#` are treated as comments.  Returns `None` if the file does not exist or
-/// the name is not present.
+/// `#` are treated as comments.  Conflict marker lines are always skipped.
+/// Returns `None` if the file does not exist or the name is not present.
 pub fn load_sum_entry(path: &Path, name: &str) -> Result<Option<String>> {
     if !path.exists() {
         return Ok(None);
@@ -262,7 +268,7 @@ pub fn load_sum_entry(path: &Path, name: &str) -> Result<Option<String>> {
 
     for line in contents.lines() {
         let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
+        if line.is_empty() || line.starts_with('#') || is_conflict_marker_line(line) {
             continue;
         }
         let mut parts = line.split_whitespace();
@@ -280,45 +286,90 @@ pub fn load_sum_entry(path: &Path, name: &str) -> Result<Option<String>> {
 ///
 /// The file is always rewritten with all entries sorted by name so the output
 /// is stable and deterministic regardless of insertion order.
-pub fn save_sum_entry(path: &Path, name: &str, hash: &str) -> Result<()> {
-    // Collect existing entries, skipping comments and blank lines.
-    let mut entries: Vec<(String, String)> = if path.exists() {
+///
+/// Conflict marker lines (`<<<<<<<`, `=======`, `>>>>>>>`) are **never**
+/// parsed as name/hash entries.  When `skip_cleanup` is `false` (the default)
+/// they are silently dropped from the rewritten file.  When `skip_cleanup` is
+/// `true` they are collected and appended verbatim at the end of the rewritten
+/// file, preserving them for manual resolution.
+pub fn save_sum_entry(path: &Path, name: &str, hash: &str, skip_cleanup: bool) -> Result<()> {
+    // Collect existing entries and (optionally) raw conflict-marker lines,
+    // skipping comments and blank lines.
+    let mut entries: Vec<(String, String)> = Vec::new();
+    let mut conflict_lines: Vec<String> = Vec::new();
+
+    if path.exists() {
         let contents = fs::read_to_string(path)
             .with_context(|| format!("Failed to read sum file {}", path.display()))?;
-        contents
-            .lines()
-            .filter_map(|line| {
-                let trimmed = line.trim();
-                if trimmed.is_empty() || trimmed.starts_with('#') {
-                    None
-                } else {
-                    let mut parts = trimmed.split_whitespace();
-                    match (parts.next(), parts.next()) {
-                        (Some(n), Some(h)) => Some((n.to_string(), h.to_string())),
-                        _ => None,
-                    }
+        for line in contents.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+            if is_conflict_marker_line(trimmed) {
+                // Conflict markers are never parsed as name/hash entries.
+                // When skip_cleanup is true, preserve them verbatim so the
+                // user can resolve the conflict manually afterward.
+                if skip_cleanup {
+                    conflict_lines.push(trimmed.to_string());
                 }
-            })
-            .filter(|(n, _)| n != name) // remove the entry we're about to upsert
-            .collect()
-    } else {
-        Vec::new()
-    };
+                continue;
+            }
+            let mut parts = trimmed.split_whitespace();
+            if let (Some(n), Some(h)) = (parts.next(), parts.next()) {
+                if n != name {
+                    // Exclude the entry we are about to upsert (handles
+                    // duplicate entries by keeping only the last write).
+                    entries.push((n.to_string(), h.to_string()));
+                }
+            }
+        }
+    }
 
     entries.push((name.to_string(), hash.to_string()));
     entries.sort_by(|a, b| a.0.cmp(&b.0));
 
-    let contents: String = entries
-        .iter()
-        .map(|(n, h)| format!("{n} {h}"))
-        .collect::<Vec<_>>()
-        .join("\n")
-        + "\n";
+    let mut output_lines: Vec<String> = entries.iter().map(|(n, h)| format!("{n} {h}")).collect();
+    output_lines.extend(conflict_lines);
 
-    fs::write(path, contents)
+    fs::write(path, output_lines.join("\n") + "\n")
         .with_context(|| format!("Failed to write sum file {}", path.display()))?;
 
     Ok(())
+}
+/// Scan the sum file for entry names that appear more than once.
+///
+/// Duplicate names can arise when a merge conflict leaves two versions of the
+/// same entry in the file (one from each side of the conflict).  Conflict
+/// marker lines are always skipped, so only genuine `<name> <hash>` entries
+/// are considered.
+///
+/// Returns the list of names that have more than one entry; the list is empty
+/// when the file is clean.
+pub fn find_duplicate_entries(path: &Path) -> Result<Vec<String>> {
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+
+    let contents = fs::read_to_string(path)
+        .with_context(|| format!("Failed to read sum file {}", path.display()))?;
+
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    for line in contents.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || is_conflict_marker_line(trimmed) {
+            continue;
+        }
+        if let Some((name, _)) = trimmed.split_once(char::is_whitespace) {
+            *counts.entry(name.to_string()).or_insert(0) += 1;
+        }
+    }
+
+    Ok(counts
+        .into_iter()
+        .filter(|(_, count)| *count > 1)
+        .map(|(name, _)| name)
+        .collect())
 }
 
 #[cfg(test)]
@@ -375,7 +426,7 @@ mod tests {
     fn test_save_and_load_sum_entry_roundtrip() {
         let dir = tempfile::tempdir().unwrap();
         let sum_path = dir.path().join("state.sum");
-        save_sum_entry(&sum_path, "myname", "deadbeef").unwrap();
+        save_sum_entry(&sum_path, "myname", "deadbeef", false).unwrap();
         let loaded = load_sum_entry(&sum_path, "myname").unwrap().unwrap();
         assert_eq!(loaded, "deadbeef");
     }
@@ -384,8 +435,8 @@ mod tests {
     fn test_save_sum_entry_updates_existing() {
         let dir = tempfile::tempdir().unwrap();
         let sum_path = dir.path().join("state.sum");
-        save_sum_entry(&sum_path, "myname", "aaa").unwrap();
-        save_sum_entry(&sum_path, "myname", "bbb").unwrap();
+        save_sum_entry(&sum_path, "myname", "aaa", false).unwrap();
+        save_sum_entry(&sum_path, "myname", "bbb", false).unwrap();
         let loaded = load_sum_entry(&sum_path, "myname").unwrap().unwrap();
         assert_eq!(loaded, "bbb");
         // Only one entry should exist for this name.
@@ -398,9 +449,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let sum_path = dir.path().join("state.sum");
         // Insert in reverse alphabetical order.
-        save_sum_entry(&sum_path, "zebra", "hash-z").unwrap();
-        save_sum_entry(&sum_path, "mango", "hash-m").unwrap();
-        save_sum_entry(&sum_path, "apple", "hash-a").unwrap();
+        save_sum_entry(&sum_path, "zebra", "hash-z", false).unwrap();
+        save_sum_entry(&sum_path, "mango", "hash-m", false).unwrap();
+        save_sum_entry(&sum_path, "apple", "hash-a", false).unwrap();
         let contents = fs::read_to_string(&sum_path).unwrap();
         let names: Vec<&str> = contents
             .lines()
@@ -413,8 +464,8 @@ mod tests {
     fn test_sum_file_multiple_entries() {
         let dir = tempfile::tempdir().unwrap();
         let sum_path = dir.path().join("state.sum");
-        save_sum_entry(&sum_path, "alpha", "hash-a").unwrap();
-        save_sum_entry(&sum_path, "beta", "hash-b").unwrap();
+        save_sum_entry(&sum_path, "alpha", "hash-a", false).unwrap();
+        save_sum_entry(&sum_path, "beta", "hash-b", false).unwrap();
         assert_eq!(
             load_sum_entry(&sum_path, "alpha").unwrap().unwrap(),
             "hash-a"
@@ -429,7 +480,7 @@ mod tests {
     fn test_load_sum_entry_not_found() {
         let dir = tempfile::tempdir().unwrap();
         let sum_path = dir.path().join("state.sum");
-        save_sum_entry(&sum_path, "other", "hash-x").unwrap();
+        save_sum_entry(&sum_path, "other", "hash-x", false).unwrap();
         let result = load_sum_entry(&sum_path, "missing").unwrap();
         assert!(result.is_none());
     }
@@ -721,5 +772,169 @@ version = "3.0.0"
         let dir = tempfile::tempdir().unwrap();
         let err = resolve_pkg_version("no-colon", dir.path());
         assert!(err.is_err());
+    }
+
+    // ── conflict marker handling ─────────────────────────────────────────────
+
+    #[test]
+    fn test_is_conflict_marker_line() {
+        assert!(is_conflict_marker_line("<<<<<<< HEAD"));
+        assert!(is_conflict_marker_line("======="));
+        assert!(is_conflict_marker_line(">>>>>>> branch-name"));
+        assert!(!is_conflict_marker_line("abc defhash"));
+        assert!(!is_conflict_marker_line("# comment"));
+        assert!(!is_conflict_marker_line(""));
+        // A line of many equals signs that is NOT a conflict marker.
+        assert!(!is_conflict_marker_line("================"));
+    }
+
+    #[test]
+    fn test_save_sum_entry_removes_conflict_markers_by_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let sum_path = dir.path().join("state.sum");
+        // Write a file that simulates a merge conflict in .stale.sum.
+        fs::write(
+            &sum_path,
+            "<<<<<<< HEAD\nalpha aaa\n=======\nalpha bbb\n>>>>>>> feature\nbeta hash-b\n",
+        )
+        .unwrap();
+        // Updating an entry should strip conflict markers.
+        save_sum_entry(&sum_path, "gamma", "hash-g", false).unwrap();
+        let contents = fs::read_to_string(&sum_path).unwrap();
+        assert!(
+            !contents.contains("<<<<<<<"),
+            "conflict markers should be removed"
+        );
+        assert!(
+            !contents.contains("======="),
+            "conflict markers should be removed"
+        );
+        assert!(
+            !contents.contains(">>>>>>>"),
+            "conflict markers should be removed"
+        );
+        // The surviving real entries and the new one should be present.
+        assert!(
+            contents.contains("beta hash-b"),
+            "beta entry should survive"
+        );
+        assert!(
+            contents.contains("gamma hash-g"),
+            "new entry should be present"
+        );
+    }
+
+    #[test]
+    fn test_save_sum_entry_skip_cleanup_preserves_conflict_markers() {
+        let dir = tempfile::tempdir().unwrap();
+        let sum_path = dir.path().join("state.sum");
+        fs::write(
+            &sum_path,
+            "<<<<<<< HEAD\nalpha aaa\n=======\nalpha bbb\n>>>>>>> feature\n",
+        )
+        .unwrap();
+        // With skip_cleanup=true the conflict markers are left in the file.
+        save_sum_entry(&sum_path, "gamma", "hash-g", true).unwrap();
+        let contents = fs::read_to_string(&sum_path).unwrap();
+        assert!(
+            contents.contains("<<<<<<<"),
+            "conflict markers should be kept with skip_cleanup"
+        );
+        assert!(
+            contents.contains("======="),
+            "=======  separator should be kept with skip_cleanup"
+        );
+        assert!(
+            contents.contains(">>>>>>>"),
+            "conflict markers should be kept with skip_cleanup"
+        );
+        // Confirm conflict markers are NOT treated as name/hash entries: loading
+        // "<<<<<<<" as a name must return None.
+        let bogus = load_sum_entry(&sum_path, "<<<<<<<").unwrap();
+        assert_eq!(
+            bogus, None,
+            "conflict marker line must not be parsed as a name/hash entry"
+        );
+        // The new entry must be present.
+        assert!(
+            contents.contains("gamma hash-g"),
+            "new entry should be present"
+        );
+    }
+
+    #[test]
+    fn test_load_sum_entry_skips_conflict_markers() {
+        let dir = tempfile::tempdir().unwrap();
+        let sum_path = dir.path().join("state.sum");
+        // Simulate a conflict: the same name appears on both sides.
+        fs::write(
+            &sum_path,
+            "<<<<<<< HEAD\nalpha aaa\n=======\nalpha bbb\n>>>>>>> feature\nbeta hash-b\n",
+        )
+        .unwrap();
+        // Conflict marker lines are skipped.  The first valid "alpha" line
+        // encountered is "alpha aaa"; "beta" is a plain entry after the markers.
+        let alpha = load_sum_entry(&sum_path, "alpha").unwrap();
+        assert_eq!(alpha, Some("aaa".to_string()));
+        let beta = load_sum_entry(&sum_path, "beta").unwrap();
+        assert_eq!(beta, Some("hash-b".to_string()));
+    }
+
+    #[test]
+    fn test_save_sum_entry_backward_compat() {
+        // Ensure the normal (no-conflict) save/load round-trip still works.
+        let dir = tempfile::tempdir().unwrap();
+        let sum_path = dir.path().join("state.sum");
+        save_sum_entry(&sum_path, "key", "val", false).unwrap();
+        let loaded = load_sum_entry(&sum_path, "key").unwrap();
+        assert_eq!(loaded, Some("val".to_string()));
+    }
+
+    // ── duplicate entry detection ────────────────────────────────────────────
+
+    #[test]
+    fn test_find_duplicate_entries_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let sum_path = dir.path().join("state.sum");
+        save_sum_entry(&sum_path, "alpha", "hash-a", false).unwrap();
+        save_sum_entry(&sum_path, "beta", "hash-b", false).unwrap();
+        let dups = find_duplicate_entries(&sum_path).unwrap();
+        assert!(dups.is_empty(), "clean file should have no duplicates");
+    }
+
+    #[test]
+    fn test_find_duplicate_entries_detects_duplicates() {
+        let dir = tempfile::tempdir().unwrap();
+        let sum_path = dir.path().join("state.sum");
+        // Manually write a file where "alpha" appears twice (simulating a
+        // merge conflict where both sides had an alpha entry).
+        fs::write(&sum_path, "alpha hash1\nalpha hash2\nbeta hash-b\n").unwrap();
+        let mut dups = find_duplicate_entries(&sum_path).unwrap();
+        dups.sort();
+        assert_eq!(dups, vec!["alpha"]);
+    }
+
+    #[test]
+    fn test_find_duplicate_entries_from_conflict_markers() {
+        let dir = tempfile::tempdir().unwrap();
+        let sum_path = dir.path().join("state.sum");
+        // Simulate a conflict where both sides of a merge had entries for the
+        // same key; the conflict markers surround the two versions.
+        fs::write(
+            &sum_path,
+            "<<<<<<< HEAD\nalpha hash-a1\nbeta hash-b1\n=======\nalpha hash-a2\nbeta hash-b2\n>>>>>>> feature\n",
+        )
+        .unwrap();
+        let mut dups = find_duplicate_entries(&sum_path).unwrap();
+        dups.sort();
+        assert_eq!(dups, vec!["alpha", "beta"]);
+    }
+
+    #[test]
+    fn test_find_duplicate_entries_missing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("no-state.sum");
+        let dups = find_duplicate_entries(&missing).unwrap();
+        assert!(dups.is_empty(), "missing file should return empty list");
     }
 }
